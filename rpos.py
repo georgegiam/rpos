@@ -1,5 +1,6 @@
 import hashlib
 import os
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 def sha256_hash(data):
@@ -10,12 +11,15 @@ def generate_hashes_in_parallel(key, num_hashes, num_threads=4):
     """Generates a specified number of hashes in parallel using multiple threads."""
     def hash_worker(start_hash, num_hashes_per_thread):
         """Worker function to compute a sequence of hashes."""
+        start_time = time.time()  # Start timer for this thread
         current_hash = start_hash
         results = []
         for _ in range(num_hashes_per_thread):
             current_hash = sha256_hash(current_hash + key)
             results.append(current_hash)
-        return results
+        duration = time.time() - start_time  # Calculate duration
+        print(f"Thread completed: {num_hashes_per_thread} hashes in {duration:.2f} seconds.")
+        return results, duration
 
     # Calculate workload per thread
     num_hashes_per_thread = num_hashes // num_threads
@@ -26,6 +30,8 @@ def generate_hashes_in_parallel(key, num_hashes, num_threads=4):
 
     # Parallel hash generation
     all_hashes = []
+    durations = []
+    start_collect_time = time.time()  # Time before starting the threads
     with ThreadPoolExecutor(max_workers=num_threads) as executor:
         # Submit tasks for all threads
         futures = [
@@ -37,12 +43,17 @@ def generate_hashes_in_parallel(key, num_hashes, num_threads=4):
             for i in range(num_threads)
         ]
         for future in futures:
-            all_hashes.extend(future.result())
+            result, thread_duration = future.result()
+            all_hashes.extend(result)
+            durations.append(thread_duration)
 
-    return all_hashes
+    collection_duration = time.time() - start_collect_time  # Calculate collection duration
+    print(f"Data collection completed in {collection_duration:.2f} seconds.")
+    return all_hashes, durations
 
 def write_hashes_to_file(hashes, file_name, buffer_size=10000):
     """Writes hashes to a file in buffered chunks."""
+    start_write_time = time.time()  # Start timer for writing to disk
     with open(file_name, 'w') as file:
         buffer = []
         for hash_val in hashes:
@@ -53,6 +64,8 @@ def write_hashes_to_file(hashes, file_name, buffer_size=10000):
         # Write any remaining hashes in the buffer
         if buffer:
             file.writelines(buffer)
+    write_duration = time.time() - start_write_time  # Calculate write duration
+    print(f"Data written to disk in {write_duration:.2f} seconds.")
 
 def create_large_blockchain_file(key, target_size_gb=1, file_name="large_blockchain_hashes.txt", num_threads=8):
     """Generates a 1GB file of hashes efficiently using parallel processing and buffered file writes."""
@@ -63,7 +76,7 @@ def create_large_blockchain_file(key, target_size_gb=1, file_name="large_blockch
     num_hashes = target_size_bytes // 65
 
     # Generate hashes in parallel
-    hashes = generate_hashes_in_parallel(key, num_hashes, num_threads=num_threads)
+    hashes, thread_durations = generate_hashes_in_parallel(key, num_hashes, num_threads=num_threads)
 
     # Write hashes to the file
     write_hashes_to_file(hashes, file_name)
