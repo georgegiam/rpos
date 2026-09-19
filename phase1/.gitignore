@@ -1,0 +1,6 @@
+# compiled benchmark binary (rebuild via the command in chainrate.c / FINDINGS.md §9)
+chainrate
+# transient Merkle-tree files written and deleted by attack_v2_checkpoint.py
+_tree_*.bin
+# scratch run logs
+results/_*.log
