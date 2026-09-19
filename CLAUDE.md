@@ -52,7 +52,7 @@ these:
 |---|---|---|
 | 0 | Preparation | **done** — repo exists (rpos cloned, `phase1/` added); supervisor meeting held, compute access secured, folder scaffold created, thesis inconsistencies fixed |
 | 1 | PoSpace risk check | **done** — see below |
-| 2 | Build resolver node | not started |
+| 2 | Build resolver node | **done** — epic #17 (all 8 sub-issues); see below |
 | 3 | Build testbed | not started |
 | 4 | Sanity checks + baseline | not started |
 | 5 | Simulator for large scale | not started |
@@ -131,22 +131,33 @@ Target submission **26 Mar 2027**; buffer to **13 Apr 2027**. Each phase has a "
 - **Done when:** you know whether δ separates honest from cheater, and the PoSpace design is
   frozen. → δ separation restored under v3; design provisionally frozen pending sign-off.
 
-### Phase 2 — Build the resolver node  *(answers (ii))*
-Build and test each step with 3–5 local nodes before moving on:
-1. [ ] Chord basics: `join`, `find_successor`, `stabilize`, `fix_fingers`, successor list.
-2. [ ] Chunk storage: domain→chunk mapping; replicate each chunk to *s* successors.
-3. [ ] DNS interface: answer real DNS over UDP so `dig` works.
-4. [ ] Query path (Algorithm 2): find responsible node; fetch from primary + replicas;
-       majority vote.
-5. [ ] Fallback: iterative resolution from a root server, then store the result.
-6. [ ] Chunk ledger (Algorithm 3): propose → pre-commit → majority commit; hash-chained log.
-7. [ ] TTL refresh: expired records trigger an update through the ledger.
-8. [ ] PoSpace admission + periodic challenges: configurable plot size and timeout δ (use
-       the **v3 DRG** scheme from Phase 1).
-9. [ ] Logging: one CSV line per query and per update (timestamps, hops, outcome, vote).
-10. [ ] Malicious-mode hooks: a config flag to lie / drop / misroute / forge. Switch only now;
-        behaviours land in Phase 7.
-- **Done when:** 5 nodes resolve correctly, survive a node leaving, commit updates, log all.
+### Phase 2 — Build the resolver node  *(answers (ii))*  *(done — code in `node/`)*
+Built and tested with 5 local nodes. Transport is **in-process (asyncio queues)**, not real
+sockets — real networking (and hence `dig` over UDP) is deferred to Phase 3 by design. The v3
+DRG scheme is **imported** from `phase1/pospace_drg.py` (not copied); `rpos/rpos.py` untouched.
+1. [x] Chord basics: `join`, `find_successor`, `stabilize`, `fix_fingers`, successor list. → `node/chord.py`
+2. [x] Chunk storage: domain→chunk mapping; replicate each chunk to *s*=3 successors. → `node/storage.py`
+3. [x] DNS interface: real wire-format DNS A queries/responses via dnspython. → `node/dns_interface.py`
+       *Caveat:* parsed/served in-process, **not yet bound to a UDP socket, so `dig` does not work
+       until Phase 3.*
+4. [x] Query path (Algorithm 2): find responsible node; fetch from primary + replicas;
+       majority vote. → `node/query.py`
+5. [x] Fallback: iterative resolution (stubbed hierarchy) then store the result back in the DHT. → `node/query.py`
+6. [x] Chunk ledger (Algorithm 3): propose → pre-commit → majority commit; hash-chained log. → `node/ledger.py`
+7. [x] TTL refresh: expired records trigger an update through the ledger. → `node/ledger.py`
+       *Known gap:* only records committed **through the ledger** are TTL-tracked; records written by
+       the query fallback's `store_chunk` bypass the ledger and are **not** refreshed. Unifying the
+       two write paths is deferred (originally pointed at #16, which did not pick it up) — track in
+       Phase 3/6 before A5 (updates/ledger growth) relies on it.
+8. [x] PoSpace admission + periodic challenges: configurable plot size, timeout δ=2 s, evict after
+       3 consecutive fails; **v3 DRG** scheme from Phase 1. → `node/pospace_admission.py`
+9. [x] Logging: one CSV line per query and per update. → `node/results/queries.csv`, `updates.csv`
+10. [x] Malicious-mode hooks: config flag honest / lie / drop / misroute / forge, inert by default;
+        behaviours land in Phase 7. → `node/malicious.py`
+- **Done when:** 5 nodes resolve correctly, survive a node leaving, commit updates, log all. →
+  **met.** Integration test (`node/integration_test.py`) green; `node/tests/` suite **9 passed**
+  (incl. `test_majority_vote.py` — a lying replica is outvoted — and `test_pospace_eviction.py` —
+  a node failing 3 challenges is evicted and the ring heals).
 
 ### Phase 3 — Build the testbed  *(answers (ii)/(iii))*
 - [ ] Local DNS world in containers: root + a few TLDs + authoritative servers; zones for
