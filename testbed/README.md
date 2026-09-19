@@ -1,3 +1,93 @@
 # testbed/
 
-Phase 3 — the emulation testbed: containerized local DNS hierarchy, scripts to launch N resolver nodes, `tc netem` link delays, Unbound baseline, and the Zipf query generator for one-command end-to-end experiments.
+Phase 3 — the emulation testbed: containerized local DNS hierarchy, N resolver nodes, an
+Unbound baseline resolver, and (later) `tc netem` link delays + a Zipf query generator for
+one-command end-to-end experiments.
+
+## Layout
+
+| Path | What | Issue |
+|---|---|---|
+| `dns/` | the authoritative DNS hierarchy (5 NSD servers: root + com/org TLDs + auth1/auth2) | #18 |
+| `docker-compose.yml` | **master compose**: `include`s the DNS tier and adds Unbound + N nodes + query-gen | #19 |
+| `up.sh` | one-command bring-up: generate zones if missing, then `up --scale node=N` | #19 |
+| `verify.sh` | done-when checker: all containers Up + Unbound recursion returns the MANIFEST answer | #19 |
+| `node/` | the resolver-node image (`Dockerfile` + `requirements.txt`) | #19 |
+| `unbound/` | the recursive-resolver image (`Dockerfile`, `unbound.conf`, `root.hints`) | #19 |
+
+## Full testbed (issue #19)
+
+One isolated bridge network `dnsnet` (`172.28.0.0/24`) carries everything:
+
+```
+dns-root .2 ─┬─ dns-tld-com .3 ─┬─ dns-auth1 .5
+             └─ dns-tld-org .4 ─┴─ dns-auth2 .6      (authoritative tier, issue #18)
+
+unbound .7         recursive resolver — recurses over the tier above
+node (×N)          rpos resolver nodes — dynamic IPs 172.28.0.129+
+query-gen          in-network dig box (placeholder for the #21 Zipf generator)
+```
+
+### Run
+
+```bash
+cd testbed
+./up.sh 8            # build + start the whole world with 8 resolver nodes (default 8)
+./verify.sh          # assert the done-when
+docker compose -f docker-compose.yml ps
+docker compose -f docker-compose.yml down    # tear down
+```
+
+`up.sh` regenerates the (git-ignored) DNS zones via `dns/generate_zones.py --count 1000` if
+`dns/zones/MANIFEST.json` is absent. **N** is a CLI argument (`./up.sh 16`), not a value in
+the compose file — it is passed to `docker compose --scale node=N`, because Compose cannot
+combine `--scale` with a static IP or `container_name` and scaffold nodes need neither yet.
+
+### What is genuinely live — and what is deliberately deferred
+
+**Live end-to-end:** Unbound performs real iterative recursion (root → TLD → authoritative)
+over the #18 hierarchy. `dig`ging a MANIFEST domain returns the exact synthetic `10.x` answer
+for that domain:
+
+```bash
+# in-network (works on every platform — the authoritative check):
+docker compose -f docker-compose.yml exec query-gen dig @unbound google.com +short   # -> 10.0.0.1
+
+# from the macOS/Linux host (published on loopback:5300):
+dig @127.0.0.1 -p 5300 google.com +short
+```
+
+> **Deliberately deferred (scaffold scope).** The N `node` containers each build a **real v3
+> DRG PoSpace plot** and stay alive (a bare TCP liveness port on 9910 backs the compose
+> healthcheck), but they do **NOT** form a Chord ring or answer DNS across containers.
+> `node/net.py` is an **in-process** message bus only — there is no cross-container transport
+> yet. Real node-to-node RPC (host:port addressing, wire serialization of RPC args incl.
+> PoSpace proofs, a background stabilize/challenge loop) and binding the DNS interface to a
+> real UDP socket are tracked in a **separate follow-up issue** and are out of scope for #19.
+> Until then, the nodes are honest singletons and only **Unbound** resolves over the tier.
+
+### Node configuration (env vars on the `node` service)
+
+`PLOT_N` (default 1024), `DRG_INDEGREE` (2), `CHALLENGE_TIMEOUT` (2.0 s), `SEED` (20260919),
+`MALICIOUS_MODE` (`honest`|`lie`|`drop`|`misroute`|`forge`). `NODE_INDEX` is unset by default:
+scaled replicas derive a distinct identity by hashing their container hostname (set
+`NODE_INDEX` only to run a single fixed node). The node image bundles both `node/` and
+`phase1/` (the v3 PoSpace scheme is imported from `phase1/` by relative path, never copied).
+
+## Notes / gotchas
+
+- **Always bring the testbed up through the master compose** (`./up.sh` / `docker compose -f
+  docker-compose.yml ...`). `include:` copies the DNS tier's services + network into this
+  project (`rpos-testbed`); it does **not** attach to a separately-running `rpos-dns` project.
+- **Static vs dynamic IPs.** The network pins `ip_range: 172.28.0.128/25` so Docker's dynamic
+  assignments (the scaled `node` service) stay in the upper half of the /24 and cannot grab
+  the static IPs `.2–.7` before `dns-root`/`unbound` start. (Docker's IPAM does not reserve
+  static addresses from the dynamic pool — without this the containers race for `.2`/`.7` and
+  fail with *"Address already in use"*.)
+- **Unbound + `10.x` answers.** `unbound.conf` must **never** contain a `private-address:`
+  line — every synthetic answer is in `10.0.0.0/8` and Unbound would strip it (empty
+  NOERROR). The resolver is left open (`access-control: 0.0.0.0/0 allow`, matching the #18
+  NSD servers) with its host port bound to loopback.
+- **macOS Docker Desktop** cannot route the `172.28` bridge IPs from the host; use the
+  published `127.0.0.1:5300` for host `dig`, or the in-network `query-gen` box for the
+  definitive check.

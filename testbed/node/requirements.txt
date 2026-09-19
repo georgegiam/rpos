@@ -1,0 +1,5 @@
+# Runtime dependencies for the resolver-node container (issue #19).
+# dnspython is the ONLY third-party import in node/ (dns.message/name/rcode/rdatatype/rrset);
+# the phase1 PoSpace chain (pospace_drg -> pospace -> drg) is stdlib-only. Pinned for
+# reproducibility (CLAUDE.md §2).
+dnspython==2.6.1

@@ -1,0 +1,7 @@
+; Issue #19 [P3-2] — root hints for the testbed's recursive resolver.
+;
+; This points Unbound at OUR containerized root server (dns-root, 172.28.0.2) as its ONLY
+; root, so it recurses over the #18 authoritative hierarchy (root -> com/org TLD -> auth1/
+; auth2) instead of the real internet. Matches zones/root/root.zone (ns.root. A 172.28.0.2).
+.            3600  IN  NS  ns.root.
+ns.root.     3600  IN  A   172.28.0.2

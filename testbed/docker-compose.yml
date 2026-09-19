@@ -1,0 +1,106 @@
+# Issue #19 [P3-2] — master testbed compose.
+#
+# Brings up the whole emulation world on ONE isolated network (dnsnet, 172.28.0.0/24):
+#   * the #18 authoritative DNS hierarchy (5 NSD servers), pulled in unchanged via `include:`
+#   * one Unbound recursive resolver (the baseline) that recurses over that hierarchy
+#   * N rpos resolver-node containers (scaled with --scale node=N; default 8 via up.sh)
+#   * a query-generator placeholder (the real Zipf generator is issue #21)
+#
+# SCAFFOLD SCOPE: the node containers each build a real PoSpace plot and stay alive, but do
+# NOT form a Chord ring or answer DNS across containers — node/net.py is an in-process bus
+# only. Real cross-container node transport + DNS-over-UDP is a separate deferred issue.
+# What is genuinely live end-to-end here is Unbound resolving over the #18 hierarchy.
+#
+# Bring up:  ./up.sh 8        (== docker compose -f docker-compose.yml up -d --build --scale node=8)
+# Tear down: docker compose -f docker-compose.yml down
+#
+# NOTE on `include`: it merges the DNS tier's services + network into THIS project
+# (rpos-testbed); the included file's own top-level `name: rpos-dns` is ignored. Do not `up`
+# dns/docker-compose.dns.yml standalone and expect this file to attach to it — always bring
+# the whole testbed up through this master compose. (Fallback, if the tier must run
+# separately: set dnsnet to `{external: true, name: rpos-dns_dnsnet}` here.)
+name: rpos-testbed
+
+include:
+  - path: dns/docker-compose.dns.yml
+
+services:
+  unbound:
+    build:
+      context: unbound
+    image: rpos-unbound:latest
+    container_name: unbound
+    restart: unless-stopped
+    # order-only: the #18 file has no healthchecks (we don't edit it). NSD starts in ms and
+    # Unbound retries upstream, so a cold-start race self-heals on the next query.
+    depends_on:
+      - dns-root
+      - dns-tld-com
+      - dns-tld-org
+      - dns-auth1
+      - dns-auth2
+    ports:
+      # macOS/Docker Desktop can't route the 172.28 bridge IPs from the host; publish a host
+      # port for `dig @127.0.0.1 -p 5300`. Bound to loopback (the resolver is open, see
+      # unbound.conf). In-network clients use @unbound / @172.28.0.7.
+      - "127.0.0.1:5300:53/udp"
+      - "127.0.0.1:5300:53/tcp"
+    networks:
+      dnsnet:
+        ipv4_address: 172.28.0.7   # single instance -> a static IP is safe (not scaled)
+
+  node:
+    build:
+      context: ..                   # repo root: the image needs BOTH node/ and phase1/
+      dockerfile: testbed/node/Dockerfile
+    image: rpos-node:latest
+    restart: unless-stopped
+    # NO container_name and NO ipv4_address so the service is scalable (docker compose forbids
+    # --scale with either). Scaffold nodes need neither: no cross-container RPC yet.
+    environment:
+      # NODE_INDEX is intentionally unset: scaled replicas derive a distinct id by hashing
+      # their container hostname (see node/run_node.py). Set it only to run a single, fixed node.
+      PLOT_N: "1024"
+      DRG_INDEGREE: "2"
+      CHALLENGE_TIMEOUT: "2.0"
+      SEED: "20260919"
+      MALICIOUS_MODE: "honest"
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import socket; socket.create_connection(('127.0.0.1', 9910), 2).close()"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 20s            # covers the plot build before the liveness port opens
+    networks:
+      - dnsnet
+
+  query-gen:
+    # Placeholder for issue #21 (the real Zipf query generator). Reuses the #18 NSD image
+    # because it ships bind-tools (`dig`), so it doubles as an in-network dig box:
+    #   docker compose exec query-gen dig @unbound <domain>
+    image: rpos-nsd:latest
+    container_name: query-gen
+    restart: unless-stopped
+    depends_on:
+      - unbound
+    command: ["sh", "-c",
+              "echo 'query-gen placeholder (real Zipf generator = issue #21); idling'; sleep infinity"]
+    networks:
+      - dnsnet
+
+networks:
+  # Redeclared to pin the name and restate the subnet; identical driver/ipam to the included
+  # file, so this merges conflict-free with the DNS tier's dnsnet.
+  dnsnet:
+    name: rpos-testbed_dnsnet
+    driver: bridge
+    ipam:
+      config:
+        # ip_range confines Docker's DYNAMIC assignments (the scaled `node` service) to the
+        # upper half of the /24. Docker's IPAM does NOT reserve statically-assigned addresses
+        # from the dynamic pool, so without this a node replica can grab 172.28.0.2/.7 before
+        # dns-root/unbound start and they fail with "Address already in use". The static IPs
+        # (.2-.7) live in the lower half and stay free.
+        - subnet: 172.28.0.0/24
+          ip_range: 172.28.0.128/25
