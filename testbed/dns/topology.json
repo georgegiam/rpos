@@ -1,0 +1,12 @@
+{
+  "_comment": "Single source of truth for the DNS-hierarchy tier (issue #18). Consumed by generate_zones.py (to write glue records) and docker-compose.dns.yml (to assign static IPs). Keep in sync: change an IP here and regenerate zones.",
+  "subnet": "172.28.0.0/24",
+  "answer_ip_base": "10.0.0.0",
+  "servers": {
+    "root": {"container": "dns-root", "ip": "172.28.0.2", "ns_name": "ns.root.", "serves": "."},
+    "com": {"container": "dns-tld-com", "ip": "172.28.0.3", "ns_name": "ns.com.", "serves": "com."},
+    "org": {"container": "dns-tld-org", "ip": "172.28.0.4", "ns_name": "ns.org.", "serves": "org."},
+    "auth1": {"container": "dns-auth1", "ip": "172.28.0.5", "serves": "per-domain zones"},
+    "auth2": {"container": "dns-auth2", "ip": "172.28.0.6", "serves": "per-domain zones"}
+  }
+}

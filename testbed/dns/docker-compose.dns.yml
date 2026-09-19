@@ -1,0 +1,78 @@
+# Issue #18 [P3-1] — the authoritative DNS-hierarchy tier (5 NSD servers).
+#
+# Self-contained on its own bridge so issue #19's master compose can `include:` this file (or
+# copy these five service definitions + the network) unchanged. Static IPs come from
+# topology.json and MUST match the glue records written by generate_zones.py.
+#
+# Host reachability note: on Docker Desktop (macOS) the 172.28.0.0/24 bridge IPs are NOT
+# routable from the host, so each server is also published on a distinct host port for `dig`
+# verification (see verify.sh). The static IPs are what containers on the network use for the
+# real referral chain (root->TLD->auth) — that is what #19's Unbound will follow. On a Linux
+# host you can additionally `dig @172.28.0.x` directly.
+name: rpos-dns
+
+# Only dns-root carries `build:` so the shared image is built exactly once; the other four
+# services reference the same tag and reuse it (avoids a parallel-build tag collision).
+x-nsd: &nsd
+  image: rpos-nsd:latest
+  restart: unless-stopped
+
+services:
+  dns-root:
+    <<: *nsd
+    build:
+      context: .
+    container_name: dns-root
+    volumes:
+      - ./zones:/zones:ro
+      - ./nsd/root.nsd.conf:/etc/nsd/nsd.conf:ro
+    ports: ["5301:53/udp", "5301:53/tcp"]
+    networks:
+      dnsnet: {ipv4_address: 172.28.0.2}
+
+  dns-tld-com:
+    <<: *nsd
+    container_name: dns-tld-com
+    volumes:
+      - ./zones:/zones:ro
+      - ./nsd/com.nsd.conf:/etc/nsd/nsd.conf:ro
+    ports: ["5302:53/udp", "5302:53/tcp"]
+    networks:
+      dnsnet: {ipv4_address: 172.28.0.3}
+
+  dns-tld-org:
+    <<: *nsd
+    container_name: dns-tld-org
+    volumes:
+      - ./zones:/zones:ro
+      - ./nsd/org.nsd.conf:/etc/nsd/nsd.conf:ro
+    ports: ["5303:53/udp", "5303:53/tcp"]
+    networks:
+      dnsnet: {ipv4_address: 172.28.0.4}
+
+  dns-auth1:
+    <<: *nsd
+    container_name: dns-auth1
+    volumes:
+      - ./zones:/zones:ro
+      - ./nsd/auth1.nsd.conf:/etc/nsd/nsd.conf:ro
+    ports: ["5304:53/udp", "5304:53/tcp"]
+    networks:
+      dnsnet: {ipv4_address: 172.28.0.5}
+
+  dns-auth2:
+    <<: *nsd
+    container_name: dns-auth2
+    volumes:
+      - ./zones:/zones:ro
+      - ./nsd/auth2.nsd.conf:/etc/nsd/nsd.conf:ro
+    ports: ["5305:53/udp", "5305:53/tcp"]
+    networks:
+      dnsnet: {ipv4_address: 172.28.0.6}
+
+networks:
+  dnsnet:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/24
