@@ -16,6 +16,7 @@ one-command end-to-end experiments.
 | `unbound/` | the recursive-resolver image (`Dockerfile`, `unbound.conf`, `root.hints`) | #19 |
 | `netem.sh` | apply/verify/clear `tc netem` link delays (5ms in-region, 50ms cross-region) | #20 |
 | `netem-helper/` | the throwaway image `netem.sh` runs in each container's netns to program `tc` | #20 |
+| `query_gen.py` | Zipf(α=1.0) DNS query generator → per-query CSV (latency/success) | #21 |
 
 ## Full testbed (issue #19)
 
@@ -72,6 +73,37 @@ container's network namespace (`docker run --net=container:<id> --cap-add=NET_AD
 DNS tier and the #19 images stay byte-identical (CLAUDE.md §2). Applies to **all** containers on
 `dnsnet` (nodes + Unbound + query-gen + the 5 DNS servers), so node↔node and Unbound↔hierarchy
 links are both emulated. Run `verify` **before** `apply` to see the ~0ms baseline.
+
+### Query generator (issue #21)
+
+`query_gen.py` drives load for the Phase 6 performance experiments: it emits DNS A queries
+following a **Zipf(α=1.0)** popularity distribution over the testbed's 1000 served domains and
+writes one CSV row per query.
+
+```bash
+cd testbed
+# done-when smoke test (no testbed needed — queries just fail, CSV is still valid):
+python3 query_gen.py --qps 10 --duration 10 --output /tmp/test.csv
+
+# real run against the testbed's Unbound (bring the world up first with ./up.sh N):
+python3 query_gen.py --qps 50 --duration 30 --resolver 127.0.0.1 --port 5300 \
+        --output ../results/unbound_50qps.csv
+```
+
+CSV schema: `timestamp,domain,resolver_used,latency_ms,success` (epoch-seconds float
+timestamp; `success` = NOERROR response carrying an A record). Key args: `--qps`,
+`--duration`, `--output` (required); `--resolver`/`--port` (default `127.0.0.1:5300`, the
+Unbound host port), `--resolver-name` (label for `resolver_used`), `--alpha` (default 1.0),
+`--seed` (default 20260919 — sampling is reproducible), `--timeout` (default 5.0s).
+
+**Domains** are read from `dns/zones/MANIFEST.json` when present (the exact served set), else
+reproduced identically from the vendored Tranco list via `dns/generate_zones.py` (so it works
+on a fresh clone). Either way they are ranked by **real Tranco popularity** — rank 1
+(`google.com`) is the most-queried — so the ordering is identical regardless of source.
+
+> **Standalone (scaffold scope).** This is the generator script only; wiring it into the
+> compose network (replacing the idle `query-gen` placeholder with a Python-capable image) is
+> a deferred follow-up. Until then, run it from the host against `127.0.0.1:5300`.
 
 ### What is genuinely live — and what is deliberately deferred
 
