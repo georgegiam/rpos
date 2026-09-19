@@ -14,6 +14,8 @@ one-command end-to-end experiments.
 | `verify.sh` | done-when checker: all containers Up + Unbound recursion returns the MANIFEST answer | #19 |
 | `node/` | the resolver-node image (`Dockerfile` + `requirements.txt`) | #19 |
 | `unbound/` | the recursive-resolver image (`Dockerfile`, `unbound.conf`, `root.hints`) | #19 |
+| `netem.sh` | apply/verify/clear `tc netem` link delays (5ms in-region, 50ms cross-region) | #20 |
+| `netem-helper/` | the throwaway image `netem.sh` runs in each container's netns to program `tc` | #20 |
 
 ## Full testbed (issue #19)
 
@@ -42,6 +44,34 @@ docker compose -f docker-compose.yml down    # tear down
 `dns/zones/MANIFEST.json` is absent. **N** is a CLI argument (`./up.sh 16`), not a value in
 the compose file — it is passed to `docker compose --scale node=N`, because Compose cannot
 combine `--scale` with a static IP or `container_name` and scaffold nodes need neither yet.
+
+### Link delays (issue #20)
+
+By default every container-to-container hop is ~0ms. `netem.sh` emulates a two-tier network
+over `dnsnet` with `tc netem`: **5ms within a region, 50ms cross-region**. Containers are
+assigned to regions **by index** (sorted by IP, `region = index % REGIONS`, default 2 regions)
+— deterministic for a given running set.
+
+```bash
+cd testbed
+./up.sh 8                # bring the world up first
+./netem.sh apply         # print the region table + program tc in every container
+./netem.sh verify        # ping a same- and a cross-region peer; assert RTT (done-when)
+./netem.sh show          # inspect each container's qdisc + filters
+./netem.sh clear         # remove all netem qdiscs
+```
+
+Delays are **one-way per direction**, applied at both endpoints, so the **ping RTT is ~2×** the
+configured number: same-region ≈ 10ms, cross-region ≈ 100ms (`verify` asserts this). Config via
+env: `SAME_MS` (5), `CROSS_MS` (50), `REGIONS` (2), `IFACE` (eth0), `PING_COUNT` (10),
+`NETWORK` (`rpos-testbed_dnsnet`).
+
+`netem.sh` needs **no changes to any real image or the compose files**: `tc`/`ping` and the
+`NET_ADMIN` capability come from a tiny helper image (`netem-helper/`) run inside each target
+container's network namespace (`docker run --net=container:<id> --cap-add=NET_ADMIN`). The #18
+DNS tier and the #19 images stay byte-identical (CLAUDE.md §2). Applies to **all** containers on
+`dnsnet` (nodes + Unbound + query-gen + the 5 DNS servers), so node↔node and Unbound↔hierarchy
+links are both emulated. Run `verify` **before** `apply` to see the ~0ms baseline.
 
 ### What is genuinely live — and what is deliberately deferred
 
