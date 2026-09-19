@@ -1,0 +1,28 @@
+chain rate (measured, 1 core): 20.36 MH/s
+N = 3,355,443,200  (log2N ~ 32)   honest full-tree storage ~ 200.0 GiB
+honest disk work per response: 66 node reads
+  measured per-read 15.82 us -> honest_disk ~ 1.04 ms (fast/partly-cached lower bound)
+  conservative 80 us/read       -> honest_disk ~ 5.28 ms (uncached NVMe)
+  (an HDD at ~7 ms/seek would be ~462 ms -- but this machine has no HDD)
+
+ delta   RTT | honest_ok honest_resp | cheat budget  k_max(par) store frac  store abs  t_cheat | separation?
+------------------------------------------------------------------------------------------------------------
+   0.1   50m |      True      55.3ms |         50ms        2^18    0.0006%     1.17MiB   25.7ms | NONE
+   0.1  150m |     False     155.3ms |        -50ms           -       inf%      infMiB    infms | honest-fails
+   0.1  300m |     False     305.3ms |       -200ms           -       inf%      infMiB    infms | honest-fails
+   0.5   50m |      True      55.3ms |        450ms        2^22    0.0000%     0.07MiB  412.0ms | NONE
+   0.5  150m |      True     155.3ms |        350ms        2^21    0.0001%     0.15MiB  206.0ms | NONE
+   0.5  300m |      True     305.3ms |        200ms        2^20    0.0001%     0.29MiB  103.0ms | NONE
+   1.0   50m |      True      55.3ms |        950ms        2^23    0.0000%     0.04MiB  823.9ms | NONE
+   1.0  150m |      True     155.3ms |        850ms        2^23    0.0000%     0.04MiB  823.9ms | NONE
+   1.0  300m |      True     305.3ms |        700ms        2^22    0.0000%     0.07MiB  412.0ms | NONE
+   2.0   50m |      True      55.3ms |       1950ms        2^24    0.0000%     0.02MiB 1647.8ms | NONE
+   2.0  150m |      True     155.3ms |       1850ms        2^24    0.0000%     0.02MiB 1647.8ms | NONE
+   2.0  300m |      True     305.3ms |       1700ms        2^24    0.0000%     0.02MiB 1647.8ms | NONE
+   5.0   50m |      True      55.3ms |       4950ms        2^25    0.0000%     0.01MiB 3295.6ms | NONE
+   5.0  150m |      True     155.3ms |       4850ms        2^25    0.0000%     0.01MiB 3295.6ms | NONE
+   5.0  300m |      True     305.3ms |       4700ms        2^25    0.0000%     0.01MiB 3295.6ms | NONE
+
+Wrote results/results_extrapolation.csv (15 rows).
+
+Bottom line: for every (delta, RTT) where the honest node can answer at all, the cheater can too -- storing at most a few MiB (parts-per-million of 200 GiB) and often answering FASTER than the honest node reads its disk. No delta separates them.

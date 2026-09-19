@@ -1,0 +1,43 @@
+[honest] N=2^20: tree   64.0 MiB on SSD, uncached disk response   0.019 ms (42 reads)
+  [cheat] N=2^20 k=2^4 : store  9.375% of honest, pass 200/200, resp@Crate   0.003 ms (worst 60 hashes), py 0.02 ms
+  [cheat] N=2^20 k=2^6 : store  2.344% of honest, pass 200/200, resp@Crate   0.012 ms (worst 252 hashes), py 0.05 ms
+  [cheat] N=2^20 k=2^8 : store  0.586% of honest, pass 200/200, resp@Crate   0.050 ms (worst 1020 hashes), py 0.19 ms
+  [cheat] N=2^20 k=2^10: store  0.146% of honest, pass 200/200, resp@Crate   0.201 ms (worst 4092 hashes), py 0.75 ms
+  [cheat] N=2^20 k=2^12: store  0.037% of honest, pass 200/200, resp@Crate   0.402 ms (worst 8190 hashes), py 2.96 ms
+  [cheat] N=2^20 k=2^14: store  0.009% of honest, pass 61/61, resp@Crate   1.609 ms (worst 32766 hashes), py 11.93 ms
+  [cheat] N=2^20 k=2^16: store  0.002% of honest, pass 20/20, resp@Crate   6.437 ms (worst 131070 hashes), py 47.70 ms
+[honest] N=2^21: tree  128.0 MiB on SSD, uncached disk response   0.020 ms (44 reads)
+  [cheat] N=2^21 k=2^4 : store  9.375% of honest, pass 200/200, resp@Crate   0.003 ms (worst 60 hashes), py 0.02 ms
+  [cheat] N=2^21 k=2^6 : store  2.344% of honest, pass 200/200, resp@Crate   0.012 ms (worst 252 hashes), py 0.05 ms
+  [cheat] N=2^21 k=2^8 : store  0.586% of honest, pass 200/200, resp@Crate   0.050 ms (worst 1020 hashes), py 0.19 ms
+  [cheat] N=2^21 k=2^10: store  0.146% of honest, pass 200/200, resp@Crate   0.100 ms (worst 2046 hashes), py 0.76 ms
+  [cheat] N=2^21 k=2^12: store  0.037% of honest, pass 200/200, resp@Crate   0.402 ms (worst 8190 hashes), py 2.99 ms
+  [cheat] N=2^21 k=2^14: store  0.009% of honest, pass 61/61, resp@Crate   1.609 ms (worst 32766 hashes), py 12.00 ms
+  [cheat] N=2^21 k=2^16: store  0.002% of honest, pass 20/20, resp@Crate   6.437 ms (worst 131070 hashes), py 47.99 ms
+[honest] N=2^22: tree  256.0 MiB on SSD, uncached disk response   0.021 ms (46 reads)
+  [cheat] N=2^22 k=2^4 : store  9.375% of honest, pass 200/200, resp@Crate   0.003 ms (worst 60 hashes), py 0.02 ms
+  [cheat] N=2^22 k=2^6 : store  2.344% of honest, pass 200/200, resp@Crate   0.012 ms (worst 252 hashes), py 0.05 ms
+  [cheat] N=2^22 k=2^8 : store  0.586% of honest, pass 200/200, resp@Crate   0.050 ms (worst 1020 hashes), py 0.19 ms
+  [cheat] N=2^22 k=2^10: store  0.146% of honest, pass 200/200, resp@Crate   0.100 ms (worst 2046 hashes), py 0.76 ms
+  [cheat] N=2^22 k=2^12: store  0.037% of honest, pass 200/200, resp@Crate   0.402 ms (worst 8190 hashes), py 3.06 ms
+  [cheat] N=2^22 k=2^14: store  0.009% of honest, pass 61/61, resp@Crate   1.609 ms (worst 32766 hashes), py 12.00 ms
+  [cheat] N=2^22 k=2^16: store  0.002% of honest, pass 20/20, resp@Crate   6.437 ms (worst 131070 hashes), py 47.70 ms
+[honest] N=2^23: tree  512.0 MiB on SSD, uncached disk response   0.023 ms (48 reads)
+  [cheat] N=2^23 k=2^4 : store  9.375% of honest, pass 200/200, resp@Crate   0.003 ms (worst 60 hashes), py 0.02 ms
+  [cheat] N=2^23 k=2^6 : store  2.344% of honest, pass 200/200, resp@Crate   0.012 ms (worst 252 hashes), py 0.05 ms
+  [cheat] N=2^23 k=2^8 : store  0.586% of honest, pass 200/200, resp@Crate   0.025 ms (worst 510 hashes), py 0.19 ms
+  [cheat] N=2^23 k=2^10: store  0.146% of honest, pass 200/200, resp@Crate   0.100 ms (worst 2046 hashes), py 0.78 ms
+  [cheat] N=2^23 k=2^12: store  0.037% of honest, pass 200/200, resp@Crate   0.402 ms (worst 8190 hashes), py 3.09 ms
+  [cheat] N=2^23 k=2^14: store  0.009% of honest, pass 61/61, resp@Crate   1.609 ms (worst 32766 hashes), py 12.10 ms
+  [cheat] N=2^23 k=2^16: store  0.002% of honest, pass 20/20, resp@Crate   6.437 ms (worst 131070 hashes), py 48.94 ms
+[honest] N=2^24: tree 1024.0 MiB on SSD, uncached disk response   0.791 ms (50 reads)
+  [cheat] N=2^24 k=2^4 : store  9.375% of honest, pass 200/200, resp@Crate   0.003 ms (worst 60 hashes), py 0.02 ms
+  [cheat] N=2^24 k=2^6 : store  2.344% of honest, pass 200/200, resp@Crate   0.012 ms (worst 252 hashes), py 0.05 ms
+  [cheat] N=2^24 k=2^8 : store  0.586% of honest, pass 200/200, resp@Crate   0.050 ms (worst 1020 hashes), py 0.20 ms
+  [cheat] N=2^24 k=2^10: store  0.146% of honest, pass 200/200, resp@Crate   0.100 ms (worst 2046 hashes), py 0.78 ms
+  [cheat] N=2^24 k=2^12: store  0.037% of honest, pass 200/200, resp@Crate   0.402 ms (worst 8190 hashes), py 3.09 ms
+  [cheat] N=2^24 k=2^14: store  0.009% of honest, pass 61/61, resp@Crate   1.609 ms (worst 32766 hashes), py 12.25 ms
+  [cheat] N=2^24 k=2^16: store  0.002% of honest, pass 20/20, resp@Crate   6.437 ms (worst 131070 hashes), py 48.91 ms
+
+Wrote results/results_v2_checkpoint.csv (35 rows) and results/honest_disk.csv (5 rows).
+(chain rate used for @Crate columns: 20.36 MH/s)
