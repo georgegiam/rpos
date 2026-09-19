@@ -124,7 +124,7 @@ class PoSpaceMixin(LedgerMixin):
         else:
             self.fail_counts[peer_id] = self.fail_counts.get(peer_id, 0) + 1
         fails = self.fail_counts[peer_id]
-        self._log("challenge", peer_id, i, "pass" if ok else "fail", elapsed, fails)
+        self._log_admission("challenge", peer_id, i, "pass" if ok else "fail", elapsed, fails)
 
         if fails >= MAX_FAILS:
             self._evict(peer_id)
@@ -148,7 +148,7 @@ class PoSpaceMixin(LedgerMixin):
         the ring (so a single malicious challenger cannot evict an honest node) is a Phase 7
         concern and out of scope here.
         """
-        self._log("evict", peer_id, -1, "evicted", 0.0, self.fail_counts.get(peer_id, 0))
+        self._log_admission("evict", peer_id, -1, "evicted", 0.0, self.fail_counts.get(peer_id, 0))
         victim = self.net.nodes.get(peer_id)
         if victim is not None:
             victim.stop()
@@ -162,7 +162,7 @@ class PoSpaceMixin(LedgerMixin):
         self.predecessor = None
         self.successor_list = [self.node_id]
         self.start()
-        self._log("join_admit", self.node_id, -1, "genesis", 0.0, 0)
+        self._log_admission("join_admit", self.node_id, -1, "genesis", 0.0, 0)
 
     async def join(self, bootstrap_id: int) -> None:
         """Join an existing ring, gated on passing one challenge from our successor."""
@@ -175,15 +175,15 @@ class PoSpaceMixin(LedgerMixin):
         except Exception:
             admitted = False
         if not admitted:
-            self._log("join_refused", succ, -1, "refused", 0.0, 0)
+            self._log_admission("join_refused", succ, -1, "refused", 0.0, 0)
             self.stop()
             raise AdmissionError(f"node {self.node_id:#x} failed admission at {succ:#x}")
         self.successor_list = [succ]
         await self._refresh_successor_list()
-        self._log("join_admit", succ, -1, "admitted", 0.0, 0)
+        self._log_admission("join_admit", succ, -1, "admitted", 0.0, 0)
 
     # ---------- logging ----------
-    def _log(self, event: str, peer: int, index: int, result: str,
+    def _log_admission(self, event: str, peer: int, index: int, result: str,
              elapsed: float, fails: int) -> None:
         append_row(POSPACE_CSV, POSPACE_HEADER,
                    [now_iso(), event, f"{self.node_id:#x}", f"{peer:#x}",
