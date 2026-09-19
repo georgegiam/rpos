@@ -4,3 +4,5 @@ chainrate
 _tree_*.bin
 # scratch run logs
 results/_*.log
+__pycache__/
+*.pyc
