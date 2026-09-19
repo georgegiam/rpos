@@ -75,6 +75,15 @@ class NodeServer:
     def register(self, name: str, coro: Callable) -> None:
         self.handlers[name] = coro
 
+    def _should_drop(self, method: str) -> bool:
+        """Hook: return True to silently drop an inbound RPC (never reply). Honest = never.
+
+        Overridden by the malicious-mode mixin (node/malicious.py) so a "drop" node can
+        black-hole requests. Kept here, honest-inert by default, so every node type gets the
+        hook without the transport knowing about attack behaviour.
+        """
+        return False
+
     async def call(self, dst: int, method: str, *args, timeout: Optional[float] = None) -> Any:
         """Convenience: RPC from this node to another (local shortcut if dst == self)."""
         if dst == self.node_id:
@@ -90,6 +99,8 @@ class NodeServer:
             msg = await self.inbox.get()
             if not self.alive:
                 break
+            if self._should_drop(msg.method):     # malicious "drop": never resolve msg.fut
+                continue
             handler = self.handlers.get(msg.method)
             try:
                 if handler is None:
