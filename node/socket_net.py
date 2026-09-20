@@ -24,21 +24,35 @@ the network. Instead we keep a short-lived failure cache: an RPC that times out 
 marks the peer down for ``dead_ttl`` seconds; a success clears it. This gives Chord a usable
 failure signal while letting a transiently-unreachable peer recover.
 
-Wire codec. Length-prefixed **pickle**. Pickle round-trips every RPC payload these handlers
-use — big ints, None, bool, str, bytes, tuples, lists, and the PoSpace proof
-``dict[int, (bytes, list[bytes])]`` — with zero custom coding, so the transport can never
-silently corrupt a security measurement by mis-typing a value. CAVEAT (flagged, not hidden):
-pickle executes arbitrary code on load, so this transport trusts its peers at the wire level.
-That is acceptable here because every peer is an instance of our own image on an isolated
-bridge network, and the adversary behaviours in the threat model (lie / drop / misroute /
-forge — see node/malicious.py) are modelled ABOVE the transport, in the node's own handlers.
-A production deployment would use a hardened wire format (e.g. length-checked protobuf); that
-is out of scope for the emulation harness and noted as a limitation.
+Wire codec. Length-prefixed **type-tagged JSON** (a *data-only* format). Unlike pickle, the
+decoder can construct nothing but a fixed set of primitives, so a hostile frame can neither
+execute code nor instantiate arbitrary objects — which matters because Phase 7 puts a
+malicious node on this wire and the transport itself must not be an attack surface. The tags
+round-trip every payload these handlers use with no loss of type: big ints (JSON keeps them
+exact — the ring is 160-bit, well past msgpack's 64-bit limit, which is why plain JSON and not
+msgpack), None, bool, float, str, bytes (base64), tuples (kept distinct from lists so
+``tag, payload = ...`` unpacking still works), lists, and dicts with non-string keys such as
+the PoSpace proof ``dict[int, (bytes, list[bytes])]``. Anything that is not one of these types
+is refused at encode time rather than silently coerced, so the transport still cannot corrupt
+a security measurement by mis-typing a value.
+
+Frame bound. A hard ``MAX_FRAME_BYTES`` cap is enforced on both directions. An inbound header
+announcing more than the cap is rejected *before* the body is read, so a peer can never make a
+node buffer an unbounded frame; ``readexactly`` then bounds the actual read to the announced
+(capped) length. This closes the memory-exhaustion vector a raw length prefix would otherwise
+open. The application-layer adversary behaviours (lie / drop / misroute / forge — see
+node/malicious.py) remain modelled ABOVE the transport, in the node's own handlers.
 """
 import asyncio
-import pickle
+import base64
+import json
 import time
 from typing import Any, Optional
+
+# Hard cap on any single frame. Legitimate payloads (PoSpace proofs a few KiB, DNS chunks,
+# ledger logs) are far below this; the cap exists only to stop a hostile/buggy peer announcing
+# a huge length and exhausting memory. Oversized frames are rejected, never buffered.
+MAX_FRAME_BYTES = 8 * 1024 * 1024
 
 
 class RemoteError(Exception):
@@ -47,15 +61,60 @@ class RemoteError(Exception):
     the in-process behaviour where the original exception object propagated back."""
 
 
+class FrameError(Exception):
+    """A frame was oversized or malformed. Treated as a connection failure: the socket is
+    dropped without buffering, so a peer cannot exhaust memory or smuggle non-data values."""
+
+
+def _enc(obj: Any) -> Any:
+    """Encode a data value into a JSON-safe, self-describing form.
+
+    Only the payload types these RPC handlers actually use are accepted; anything else raises.
+    That refusal is the point of a data-only wire: decoding (``_dec``) can rebuild nothing but
+    these primitives, so a crafted frame cannot execute code or build arbitrary objects.
+    """
+    if obj is None or isinstance(obj, (bool, int, float, str)):
+        return obj                                    # JSON preserves big ints exactly
+    if isinstance(obj, (bytes, bytearray)):
+        return {"b": base64.b64encode(bytes(obj)).decode("ascii")}
+    if isinstance(obj, tuple):
+        return {"t": [_enc(x) for x in obj]}
+    if isinstance(obj, list):
+        return [_enc(x) for x in obj]
+    if isinstance(obj, dict):
+        return {"d": [[_enc(k), _enc(v)] for k, v in obj.items()]}
+    raise FrameError(f"non-data value of type {type(obj).__name__!r} cannot be sent")
+
+
+def _dec(obj: Any) -> Any:
+    """Inverse of ``_enc``. Bare JSON scalars pass through; a JSON object is only ever one of
+    our tag wrappers, so an unrecognised object shape is rejected rather than trusted."""
+    if isinstance(obj, list):
+        return [_dec(x) for x in obj]
+    if isinstance(obj, dict):
+        if "b" in obj:
+            return base64.b64decode(obj["b"])
+        if "t" in obj:
+            return tuple(_dec(x) for x in obj["t"])
+        if "d" in obj:
+            return {_dec(k): _dec(v) for k, v in obj["d"]}
+        raise FrameError("unrecognised object tag on the wire")
+    return obj
+
+
 async def _read_frame(reader: asyncio.StreamReader) -> Any:
     header = await reader.readexactly(4)
     n = int.from_bytes(header, "big")
-    body = await reader.readexactly(n)
-    return pickle.loads(body)
+    if n > MAX_FRAME_BYTES:                            # reject BEFORE allocating/reading the body
+        raise FrameError(f"frame of {n} bytes exceeds cap {MAX_FRAME_BYTES}")
+    body = await reader.readexactly(n)                 # bounded read: at most the capped length
+    return _dec(json.loads(body.decode("utf-8")))
 
 
 async def _write_frame(writer: asyncio.StreamWriter, obj: Any) -> None:
-    body = pickle.dumps(obj, protocol=pickle.HIGHEST_PROTOCOL)
+    body = json.dumps(_enc(obj), separators=(",", ":")).encode("utf-8")
+    if len(body) > MAX_FRAME_BYTES:
+        raise FrameError(f"outbound frame of {len(body)} bytes exceeds cap {MAX_FRAME_BYTES}")
     writer.write(len(body).to_bytes(4, "big") + body)
     await writer.drain()
 
@@ -165,7 +224,8 @@ class SocketNetwork:
                 await _write_frame(writer, ("OK", result))
             except Exception as e:
                 await _write_frame(writer, ("ERR", repr(e)))
-        except (asyncio.IncompleteReadError, ConnectionError):
+        except (asyncio.IncompleteReadError, ConnectionError, FrameError):
+            # peer vanished, or sent an oversized/malformed frame — drop it, don't buffer.
             pass
         finally:
             writer.close()
