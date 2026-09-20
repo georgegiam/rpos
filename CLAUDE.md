@@ -53,7 +53,7 @@ these:
 | 0 | Preparation | **done** — repo exists (rpos cloned, `phase1/` added); supervisor meeting held, compute access secured, folder scaffold created, thesis inconsistencies fixed |
 | 1 | PoSpace risk check | **done** — see below |
 | 2 | Build resolver node | **done** — epic #17 (all 8 sub-issues); see below |
-| 3 | Build testbed | **in progress** — ring transport built, N=8 nodes-mode passing; N=64 still owed |
+| 3 | Build testbed | **in progress** — transport hardened (data-only codec + frame cap); N=8 nodes-mode healthy (96.7%); N=64 runs end-to-end + real results file but **not reliable** (24% under netem; 55% no-netem) — Chord finger convergence at scale, see Phase 3 |
 | 4 | Sanity checks + baseline | not started |
 | 5 | Simulator for large scale | not started |
 | 6 | Performance experiments | not started |
@@ -170,23 +170,48 @@ DRG scheme is **imported** from `phase1/pospace_drg.py` (not copied); `rpos/rpos
 - [x] One-command end-to-end experiment: start → warm up → load → collect CSVs → shut down. → `testbed/run_experiment.sh`
 - [x] **Real socket transport so nodes form a Chord ring across containers** (the Phase-2-deferred
       networking). Added **alongside** the in-process bus, selected by config:
-      `node/socket_net.py` (TCP RPC + liveness, length-prefixed pickle), `node/run_ring_node.py`
+      `node/socket_net.py` (TCP RPC + liveness, **length-prefixed data-only codec**), `node/run_ring_node.py`
       (create/join over sockets + UDP DNS front end + maintenance loop),
       `testbed/gen_nodes_compose.py` (N-node ring compose). `run_experiment.sh --mode nodes`
       routes queries to the ring; `--mode host` keeps the Unbound baseline. All Chord/storage/
       ledger/PoSpace RPCs now travel over the wire; protocol logic is byte-identical to Phase 2.
-- [ ] Scale-up test: largest reliable N (aim 128–256). *(not started — nodes-mode proven at N=8.)*
+- [~] Scale-up test: largest reliable N (aim 128–256). *(N=64 now exercised end-to-end but not
+      yet **reliable** — see the N=64 finding below; 128–256 not attempted until it is.)*
 - **Done when:** one command runs a full experiment at N=64 and produces results files. →
-  **partially met.** One command runs both modes end-to-end at **N=8** and produces
-  `results/*.csv` + `experiments.csv`. nodes-mode is real now: `resolver_used=node-<id>` (not
-  `unbound-host`), honest ~96.7% success under netem, Chord hops logged (median 2, max 10);
+  **N=64 now runs and produces a real results file, but is NOT healthy — treated as
+  in-progress, not done.** One command runs both modes end-to-end and produces `results/*.csv` +
+  `experiments.csv`. nodes-mode is real: `resolver_used=node-<id>` (not `unbound-host`);
   host-mode is the Unbound baseline (100%, far lower latency — the ring pays multi-hop + 2PC +
-  netem). Owed, flagged not hidden:
-  - **N=64 (and 128–256 scale-up) not yet exercised** — only N=8 has been run.
+  netem). Results, flagged not hidden:
+  - **N=8 nodes-mode: healthy, 96.67%** under netem (post-transport-fix; within ~1 pt of the
+    prior 96.7% — the codec change did not regress it). Hops median 4, max 10.
+  - **N=64 nodes-mode: real results file, but low success — an open scaling issue.**
+    - Under netem, 30 s warmup: **4.7%** (286/300 fail); hops mean 7.26, max 23.
+    - Under netem, 180 s warmup (lets fingers converge further): **24.0%**; hops mean 5.09,
+      max 17; p50 640 ms. Better, still unhealthy.
+    - **Isolating cause** — no netem, 30 s timeout, converged ring: **55%** (33/60), latency
+      median 33 ms but 27/60 fail to route within 30 s. So this is **not merely netem latency**:
+      a substantial fraction of lookups genuinely fail to route at N=64.
+    - **Root cause (diagnosed, not a transport regression — N=8 is healthy over the same codec):**
+      Chord finger convergence at scale. `node/chord.py` (Phase 2, must-not-modify) fixes **one
+      finger per maintenance round** across **M=160** slots, ~1/s. With 64 nodes in a 2^160 ring
+      the mean inter-node gap is ~2^154, so **only the top ~6 fingers (154–159) actually shorten a
+      lookup**, and those converge last and unevenly. Until they do, lookups fall back to the
+      successor list (O(N) hops), and connection-per-RPC over netem then blows past the 5 s client
+      timeout. At N=8 successor-hopping is cheap, so N=8 is immune.
+    - **Fix owed before Phase 4/6 (needs a Phase-2-safe lever, since chord.py is frozen):** e.g.
+      lower `MAINT_INTERVAL` / fix multiple fingers per round via `run_ring_node.py` config, seed
+      finger tables from the successor list on join, or a longer mandated convergence phase before
+      measuring — to be chosen and re-measured. Do **not** raise the client timeout to paper over
+      it (that would mask, not fix).
   - **Distributed PoSpace eviction is still a stand-in** (`_evict` can't stop a remote node over
     sockets); honest nodes never trigger it, but Phase 7 needs consensus eviction.
-  - **Transport codec is pickle** (trusts the peer image on an isolated network; app-layer malice
-    is modelled above it) — a production wire format is out of scope. See `node/socket_net.py`.
+  - **Transport hardened (this session):** pickle removed from the wire in favour of a length-
+    prefixed **type-tagged JSON data-only codec** (decoder builds only fixed primitives — no code
+    execution, no arbitrary objects; big 160-bit ids kept exact, tuples distinct from lists, bytes
+    base64), plus a hard **8 MiB frame cap** rejected before the body is read (bounded reads, no
+    memory exhaustion). This closes the transport as an attack surface for the Phase 7 malicious
+    node; app-layer malice stays modelled above it. See `node/socket_net.py`.
   - Per-run CSVs are git-ignored (seed-reproducible per §2); `experiments.csv` keeps the summary row.
 
 ### Phase 4 — Sanity checks + baseline
