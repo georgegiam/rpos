@@ -17,6 +17,7 @@ one-command end-to-end experiments.
 | `netem.sh` | apply/verify/clear `tc netem` link delays (5ms in-region, 50ms cross-region) | #20 |
 | `netem-helper/` | the throwaway image `netem.sh` runs in each container's netns to program `tc` | #20 |
 | `query_gen.py` | Zipf(α=1.0) DNS query generator → per-query CSV (latency/success) | #21 |
+| `run_experiment.sh` | **one-command runner**: up → health → netem → warm-up → load → summary → down | #22 |
 
 ## Full testbed (issue #19)
 
@@ -104,6 +105,44 @@ on a fresh clone). Either way they are ranked by **real Tranco popularity** — 
 > **Standalone (scaffold scope).** This is the generator script only; wiring it into the
 > compose network (replacing the idle `query-gen` placeholder with a Python-capable image) is
 > a deferred follow-up. Until then, run it from the host against `127.0.0.1:5300`.
+
+### One-command experiments (issue #22)
+
+`run_experiment.sh` chains the four scripts above into a single end-to-end run with **no manual
+steps** (the Phase 3 done-when): bring up → wait for health → apply `netem` → warm up → drive
+`query_gen` → summarise → tear down.
+
+```bash
+cd testbed
+./run_experiment.sh --nodes 8 --qps 20 --duration 15
+# one-line summary, e.g.:
+# [run_experiment] N=8 qps=20 dur=15 netem=on mode=host rows=300 ok=300 (100.0%) \
+#   ach=20.0qps p50=2.1 p95=8.4 p99=15.2 ms -> results/exp_20260920-...Z_N8_q20_d15.csv
+```
+
+Per-query CSVs land in **`../results/`** (`exp_<UTC-timestamp>_N…_q…_d….csv`) and one summary
+row per run is appended to **`../results/experiments.csv`** for Phase 6 aggregation.
+
+Key options: `--nodes N` [8], `--qps` / `--duration` (required), `--warmup S` [30],
+`--seed S` [20260919], `--alpha` [1.0]; `--no-netem`, `--regions`/`--same-ms`/`--cross-ms`;
+`--resolver`/`--port` (force host mode), `--output-dir`, `--health-timeout` [180], `--keep-up`;
+`--help` prints the full banner.
+
+**What it measures.** Only Unbound is live end-to-end (nodes are still scaffold singletons —
+see below), so this is the **Unbound baseline** (Phase 4/6 A1), not the DHT resolver.
+
+**Resolver path (two modes, chosen automatically).** By default the load runs on the **host**
+against `127.0.0.1:5300`. After the health gate the script probes that port once; if it's dead
+(the documented macOS Docker Desktop host-forward quirk, which would otherwise give an
+all-failure CSV) it falls back to **in-network** mode — `query_gen` inside a throwaway
+`rpos-node:latest` container on `dnsnet`, straight at Unbound `172.28.0.7:53` (that image
+already ships `dnspython`, so no pip install). Passing `--resolver` forces host mode.
+
+> **netem caveat.** `netem.sh` programs delays for the containers present when it runs, so the
+> Unbound↔hierarchy links *are* delayed in both modes. The client↔resolver hop is not: the host
+> isn't a container, and the in-network throwaway box joins `dnsnet` *after* `netem apply` (its
+> dynamic IP isn't in the peers' filters). Both modes therefore share an undelayed client hop —
+> consistent, but it slightly understates end-to-end latency.
 
 ### What is genuinely live — and what is deliberately deferred
 

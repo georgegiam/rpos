@@ -1,0 +1,4 @@
+# Phase 3–8 experiment outputs (issue #22 run_experiment.sh + later phases); regenerated from a
+# fixed seed on each run (CLAUDE.md §2), so not committed. The directory itself is kept.
+*.csv
+!.gitkeep
