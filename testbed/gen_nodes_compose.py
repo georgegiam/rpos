@@ -57,6 +57,8 @@ def _service(j: int, n: int, a) -> str:
       SEED: "{a.seed}"
       MALICIOUS_MODE: "{a.mode}"
       MAINT_INTERVAL: "1.0"
+      RING_IP_PREFIX: "172.30.0"
+      RING_IP_BASE: "{IP_BASE}"
     volumes:
       - ../testbed/dns/zones/MANIFEST.json:/zones/MANIFEST.json:ro
       - ../results/ring/{j}:/app/node/results

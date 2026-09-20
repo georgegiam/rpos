@@ -44,7 +44,7 @@ import asyncio
 import json
 import os
 
-from node.ids import node_id_from_pk
+from node.ids import RING_BITS, RING_SIZE, node_id_from_pk
 from node.malicious import MODES, MaliciousNode
 from node.pospace_admission import AdmissionError, PoSpaceNode
 from node.query import IterativeResolver
@@ -71,11 +71,25 @@ def _cfg():
         mode=mode,
         maint_interval=float(os.environ.get("MAINT_INTERVAL", "1.0")),
         join_timeout=float(os.environ.get("JOIN_TIMEOUT", "120")),
+        join_stagger=float(os.environ.get("JOIN_STAGGER", "0.4")),
     )
 
 
 def _build_roster(c) -> dict[int, tuple[str, int]]:
-    """id -> (host, port) for every node, derived deterministically from N."""
+    """id -> (host, port) for every node, derived deterministically from N.
+
+    If the compose passed static container IPs (RING_IP_PREFIX/RING_IP_BASE — node j lives at
+    ``<prefix>.<base+j>``), address peers by IP so the hot path NEVER touches Docker's embedded
+    DNS. Per-connect hostname resolution was the dominant N=64 failure: under the startup
+    connection storm the embedded DNS stalls ~2 s or fails ~1-3% of lookups, which fails
+    maintenance RPCs and churns Chord successors (connect-by-IP measured 0% failures / 0.2 ms).
+    Falls back to Docker service names when no static-IP scheme is provided (e.g. unit tests)."""
+    prefix = os.environ.get("RING_IP_PREFIX")
+    base = os.environ.get("RING_IP_BASE")
+    if prefix and base:
+        b = int(base)
+        return {node_id_from_pk(_pk_for(j)): (f"{prefix}.{b + j}", c["ring_port"])
+                for j in range(c["n"])}
     return {node_id_from_pk(_pk_for(j)): (f"{c['prefix']}{j}", c["ring_port"])
             for j in range(c["n"])}
 
@@ -114,6 +128,37 @@ class _DnsProto(asyncio.DatagramProtocol):
             self.transport.sendto(resp, addr)
 
 
+async def _refresh_top_fingers(node, k: int) -> None:
+    """Refresh the top ``k`` (highest-index) finger slots this round, concurrently.
+
+    Why this exists (Phase 3 scale fix, chord.py left byte-identical): chord.py's ``fix_fingers``
+    cycles ONE of the M=160 slots per call. At N=64 the 63 non-seed nodes all join the seed at
+    once (docker compose up -d), forming a star that ``stabilize`` untangles into a ring; a finger
+    that ``fix_fingers`` set during that unstable phase points at the wrong node and is not
+    revisited for a full ~160-round cycle, so lookups fall back to O(N) successor walks (measured:
+    median ~30 hops) long after the ring is cycle-consistent, blowing past the 5 s query timeout.
+
+    Only the HIGH fingers matter: with N nodes uniformly in the 2**160 ring the mean gap is
+    2**160/N, so a finger whose jump 2**i is smaller than that gap just points at the immediate
+    successor (harmless, and ``closest_preceding`` skips such duplicates). So we refresh only the
+    top ``k`` slots — enough to cover the ~log2(N) useful ones with margin — instead of all 160.
+    Refreshing all 160 (an earlier attempt) spawned 160 concurrent lookups per node per round and
+    periodically saturated event loops, starving the stabilize/notify RPCs and ORPHANING nodes;
+    a small ``k`` avoids that while keeping the useful fingers fresh within one round of the ring
+    stabilising (measured drop to ~3 hops). Same rule as fix_fingers (successor of node_id+2**i),
+    run concurrently; drives only chord.py's public find_successor and writes its ``fingers`` list
+    — the Chord algorithm is unchanged.
+    """
+    lo = max(0, RING_BITS - k)
+    idxs = list(range(lo, RING_BITS))
+    starts = [(node.node_id + (1 << i)) % RING_SIZE for i in idxs]
+    results = await asyncio.gather(*(node.find_successor(s) for s in starts),
+                                   return_exceptions=True)
+    for i, r in zip(idxs, results):
+        if not isinstance(r, BaseException):
+            node.fingers[i] = r[0]
+
+
 async def _join_with_retry(node, seed_id: int, c) -> None:
     """Keep retrying join() until the seed's ring is reachable and admits us."""
     loop = asyncio.get_event_loop()
@@ -145,8 +190,18 @@ async def _main() -> None:
     node = (PoSpaceNode(pk, net, **kw) if c["mode"] == "honest"
             else MaliciousNode(pk, net, malicious_mode=c["mode"], **kw))
 
+    # read-only introspection RPC (diagnostics only: verify finger convergence at scale).
+    async def _h_debug_state(src):
+        return {"node_id": node.node_id, "pred": node.predecessor,
+                "succ_list": list(node.successor_list), "fingers": list(node.fingers)}
+    node.register("debug_state", _h_debug_state)
+
     # 1) serve RPCs BEFORE joining, so our successor can challenge us during admission.
     await net.start_server("0.0.0.0", c["ring_port"])
+
+    # pre-resolve peer IPs in the background so the hot path never hits Docker's (load-flaky)
+    # embedded DNS — the real cause of the N=64 convergence churn (see socket_net._ip_cache).
+    asyncio.ensure_future(net.prewarm())
 
     # 2) DNS front end.
     loop = asyncio.get_event_loop()
@@ -159,22 +214,47 @@ async def _main() -> None:
           f"(seed={c['seed_index']})", flush=True)
 
     # 3) create (seed) or join (everyone else).
+    #
+    # STAGGERED joins: if all N nodes join the seed at once (docker compose up -d), they form a
+    # giant star that stabilize must untangle over ~O(N) rounds, and the find_successor traffic
+    # during that long unstable window churns successors faster than they heal — at N=64 the
+    # cycle then never fully converges. Waiting index*JOIN_STAGGER before joining grows the ring
+    # incrementally, so each node joins a nearly-stable ring and converges almost immediately.
     seed_id = node_id_from_pk(_pk_for(c["seed_index"]))
     if c["index"] == c["seed_index"]:
         await node.create()
         print(f"[ring {self_id:#x}] created ring as seed", flush=True)
     else:
+        await asyncio.sleep(c["index"] * c["join_stagger"])
         await _join_with_retry(node, seed_id, c)
 
     # 4) maintenance loop: the socket equivalent of the Phase 2 round-drivers.
+    #
+    # PRIORITY: keep the ring CYCLE converging. chord.py's stabilize drops its successor on ANY
+    # RPC exception (including a transient timeout), so if heavy maintenance floods the transport
+    # and makes stabilize's get_predecessor time out, nodes shed good successors faster than they
+    # heal and the cycle never converges (measured: only ~33/64 correct successors under a
+    # per-round finger storm). So stabilize/check_predecessor run every round on their own, and
+    # the heavier finger refresh runs only OCCASIONALLY, well spaced from the challenge round, so
+    # it never competes with stabilize in the same tick.
     challenge_every = max(1, int(5.0 / c["maint_interval"]))   # ~ every 5s
+    fingers_every = max(1, int(4.0 / c["maint_interval"]))     # top-finger refresh ~ every 4s
+    top_k = min(RING_BITS, max(16, 2 * max(1, c["n"]).bit_length() + 6))
+    # Priority order per round: stabilize + check_predecessor (the cheap ring-cycle protocol)
+    # always run; the heavier find_successor-based maintenance (top-finger refresh, PoSpace
+    # challenge) is spaced out so it competes less with stabilize. NOTE (flagged, not hidden):
+    # at N=64 in the 64-container testbed this still does not fully converge the cycle under load
+    # — see CLAUDE.md Phase 3 "N=64 convergence" for the measured behaviour and root cause.
     round_no = 0
     while True:
         round_no += 1
         try:
             await node.stabilize()
-            await node.fix_fingers()
             await node.check_predecessor()
+            if round_no % fingers_every == 0 and round_no % challenge_every != 0:
+                await _refresh_top_fingers(node, top_k)
+            else:
+                await node.fix_fingers()
             if round_no % challenge_every == 0:
                 await node.challenge_round()
                 await node.refresh_expired()
