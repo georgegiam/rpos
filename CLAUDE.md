@@ -53,7 +53,7 @@ these:
 | 0 | Preparation | **done** — repo exists (rpos cloned, `phase1/` added); supervisor meeting held, compute access secured, folder scaffold created, thesis inconsistencies fixed |
 | 1 | PoSpace risk check | **done** — see below |
 | 2 | Build resolver node | **done** — epic #17 (all 8 sub-issues); see below |
-| 3 | Build testbed | **done** — epic #24 (sub-issues #18–#23 all closed); see below |
+| 3 | Build testbed | **in progress** — ring transport built, N=8 nodes-mode passing; N=64 still owed |
 | 4 | Sanity checks + baseline | not started |
 | 5 | Simulator for large scale | not started |
 | 6 | Performance experiments | not started |
@@ -159,27 +159,35 @@ DRG scheme is **imported** from `phase1/pospace_drg.py` (not copied); `rpos/rpos
   (incl. `test_majority_vote.py` — a lying replica is outvoted — and `test_pospace_eviction.py` —
   a node failing 3 challenges is evicted and the ring heals).
 
-### Phase 3 — Build the testbed  *(answers (ii)/(iii))*  *(done — epic #24; code in `testbed/`)*
+### Phase 3 — Build the testbed  *(answers (ii)/(iii))*  *(in progress — epic #24; code in `testbed/`, `node/`)*
 - [x] Local DNS world in containers: NSD root + com/org TLDs + 2 authoritative servers; zones for
       1000 Tranco domains with realistic TTLs (300–3600 s). → `testbed/dns/`
-- [x] Docker Compose/script to start N resolver nodes automatically. → `testbed/docker-compose.yml`, `up.sh` (`--scale node=N`)
+- [x] Docker Compose/script to start N resolver nodes automatically. → `testbed/docker-compose.yml`, `up.sh`
 - [x] `tc netem` delays between containers (two-tier: 5 ms same-region / 50 ms cross-region). → `testbed/netem.sh`
 - [x] Unbound against the same hierarchy and delays. → `testbed/unbound/`
 - [x] Query generator with Zipf popularity (α=1.0). → `testbed/query_gen.py`
       *Note:* uses a built-in dnspython query loop, **not** `dnsperf`/`resperf`.
 - [x] One-command end-to-end experiment: start → warm up → load → collect CSVs → shut down. → `testbed/run_experiment.sh`
-- [ ] Scale-up test: largest reliable N (aim 128–256). *(deferred — smoke-tested at N=8 only; see caveats.)*
+- [x] **Real socket transport so nodes form a Chord ring across containers** (the Phase-2-deferred
+      networking). Added **alongside** the in-process bus, selected by config:
+      `node/socket_net.py` (TCP RPC + liveness, length-prefixed pickle), `node/run_ring_node.py`
+      (create/join over sockets + UDP DNS front end + maintenance loop),
+      `testbed/gen_nodes_compose.py` (N-node ring compose). `run_experiment.sh --mode nodes`
+      routes queries to the ring; `--mode host` keeps the Unbound baseline. All Chord/storage/
+      ledger/PoSpace RPCs now travel over the wire; protocol logic is byte-identical to Phase 2.
+- [ ] Scale-up test: largest reliable N (aim 128–256). *(not started — nodes-mode proven at N=8.)*
 - **Done when:** one command runs a full experiment at N=64 and produces results files. →
-  **partially met.** The one command works end-to-end and produces `results/*.csv` +
-  `experiments.csv`; smoke test #23 ran at **N=8** (2 runs, 300 rows each, 100% success). Two
-  caveats to carry into Phase 4/6, flagged not hidden:
-  - **N=64 done-when not yet exercised** — only N=8 has been run; a real N=64 (and the 128–256
-    scale-up) run is still owed.
-  - **What is measured is the Unbound baseline, not the DHT resolver.** The `node` containers
-    build a real v3 DRG plot and pass a TCP liveness check but do **not** form a Chord ring or
-    answer DNS across containers (`node/net.py` is an in-process bus). Cross-container node
-    transport + DNS-over-UDP is deferred and **untracked** — needed before Phase 6/7 can measure
-    the actual system. Smoke-test CSVs are git-ignored (seed-reproducible per §2).
+  **partially met.** One command runs both modes end-to-end at **N=8** and produces
+  `results/*.csv` + `experiments.csv`. nodes-mode is real now: `resolver_used=node-<id>` (not
+  `unbound-host`), honest ~96.7% success under netem, Chord hops logged (median 2, max 10);
+  host-mode is the Unbound baseline (100%, far lower latency — the ring pays multi-hop + 2PC +
+  netem). Owed, flagged not hidden:
+  - **N=64 (and 128–256 scale-up) not yet exercised** — only N=8 has been run.
+  - **Distributed PoSpace eviction is still a stand-in** (`_evict` can't stop a remote node over
+    sockets); honest nodes never trigger it, but Phase 7 needs consensus eviction.
+  - **Transport codec is pickle** (trusts the peer image on an isolated network; app-layer malice
+    is modelled above it) — a production wire format is out of scope. See `node/socket_net.py`.
+  - Per-run CSVs are git-ignored (seed-reproducible per §2); `experiments.csv` keeps the summary row.
 
 ### Phase 4 — Sanity checks + baseline
 - [ ] Measured hop counts vs Chord theory (≈½ log₂N); mismatch = bug.

@@ -60,16 +60,181 @@ MANIFEST="dns/zones/MANIFEST.json"
 N=8; QPS=""; DURATION=""; WARMUP=30; SEED=20260919; ALPHA=1.0
 NO_NETEM=0; REGIONS=2; SAME_MS=5; CROSS_MS=50
 RESOLVER=""; PORT=5300; OUTDIR="$REPO_ROOT/results"; HEALTH_TIMEOUT=180; KEEP_UP=0
+# epic #24: EXPMODE=host -> Unbound baseline (the original path); EXPMODE=nodes -> the real
+# resolver ring (node/run_ring_node over sockets). nodes-mode uses the extra params below.
+EXPMODE=host; RING_PORT=7000; DNS_PORT=5300; PLOT_N=1024; DRG_INDEGREE=2
 
 # Print the leading comment banner (lines 2.. up to `set -euo`) as help text.
 usage() { awk 'NR>1 && /^set -euo/{exit} NR>1{sub(/^# ?/,"");print}' "$0"; }
 fail()  { echo "FAIL: $*" >&2; exit 1; }
 note()  { echo "== $* =="; }
 
+# ---- summary + manifest row (shared by both modes) -------------------------------------------
+# Args: CSV MANIFEST_CSV RUN_TAG N QPS DUR WARMUP SEED MODE NETEM(0/1) REPO
+summarise() {
+    python3 - "$@" <<'PY'
+import csv, os, statistics, sys
+csv_path, manifest, tag, n, qps, dur, warmup, seed, mode, netem, repo = sys.argv[1:12]
+lat_ok, rows, ok = [], 0, 0
+with open(csv_path) as f:
+    for r in csv.DictReader(f):
+        rows += 1
+        if r["success"] == "True":
+            ok += 1
+            try: lat_ok.append(float(r["latency_ms"]))
+            except ValueError: pass
+def pct(vals, p):
+    if not vals: return float("nan")
+    if len(vals) == 1: return vals[0]
+    return statistics.quantiles(vals, n=100, method="inclusive")[p - 1]
+rate    = 100.0 * ok / rows if rows else 0.0
+ach_qps = rows / float(dur) if float(dur) else 0.0
+p50, p95, p99 = (pct(lat_ok, p) for p in (50, 95, 99))
+netem_on = "on" if netem == "1" else "off"
+rel = os.path.relpath(csv_path, repo)
+print(f"[run_experiment] N={n} qps={qps} dur={dur} netem={netem_on} mode={mode} "
+      f"rows={rows} ok={ok} ({rate:.1f}%) ach={ach_qps:.1f}qps "
+      f"p50={p50:.1f} p95={p95:.1f} p99={p99:.1f} ms -> {rel}")
+header = ["run_tag","nodes","qps","duration","warmup","seed","mode","netem",
+          "rows","ok","success_rate_pct","achieved_qps","p50_ms","p95_ms","p99_ms","csv"]
+new = not os.path.exists(manifest)
+with open(manifest, "a", newline="") as f:
+    w = csv.writer(f)
+    if new: w.writerow(header)
+    w.writerow([tag, n, qps, dur, warmup, seed, mode, netem_on, rows, ok,
+                f"{rate:.2f}", f"{ach_qps:.3f}", f"{p50:.3f}", f"{p95:.3f}", f"{p99:.3f}", rel])
+PY
+}
+
+# ---- nodes-mode: real resolver ring over sockets (epic #24) ----------------------------------
+run_nodes_mode() {
+    # NB: these are script-GLOBAL (no `local`) on purpose — the EXIT trap ring_teardown runs
+    # after this function has returned (dispatch does `run_nodes_mode; exit 0`), so its frame
+    # locals would be gone and `set -u` would abort mid-teardown, leaking containers/netem.
+    RC="docker compose -f docker-compose.nodes.yml"
+    RINGNET="rpos-ring_ringnet"
+    NETEM_ON=0
+    local TS RUN_TAG CSV WARMUP_CSV
+    TS="$(date -u +%Y%m%d-%H%M%SZ)"
+    RUN_TAG="exp_${TS}_N${N}_q${QPS}_d${DURATION}_nodes"
+    mkdir -p "$OUTDIR"
+    CSV="$OUTDIR/${RUN_TAG}.csv"
+    WARMUP_CSV="$(mktemp -d)/warmup.csv"
+
+    ring_teardown() {
+        if [ "${KEEP_UP:-0}" -eq 1 ]; then
+            note "leaving the ring up (--keep-up); tear down with: ${RC} down -v"
+            return 0
+        fi
+        note "tearing down the ring"
+        [ "${NETEM_ON:-0}" -eq 1 ] && NETWORK="${RINGNET}" ./netem.sh clear >/dev/null 2>&1 || true
+        ${RC} down -v >/dev/null 2>&1 || true
+    }
+    trap ring_teardown EXIT
+
+    # zones (deterministic; git-ignored) + generated compose + per-node result dirs
+    [ -f "$MANIFEST" ] || { note "generating zones (deterministic, --count 1000)"; \
+        python3 dns/generate_zones.py --count 1000; }
+    note "generating docker-compose.nodes.yml for N=$N ring nodes"
+    python3 gen_nodes_compose.py --nodes "$N" --plot-n "$PLOT_N" --drg-indegree "$DRG_INDEGREE" \
+        --seed "$SEED" --ring-port "$RING_PORT" --dns-port "$DNS_PORT"
+    local j
+    for j in $(seq 0 $((N - 1))); do
+        mkdir -p "$REPO_ROOT/results/ring/$j"
+        : > "$REPO_ROOT/results/ring/$j/queries.csv" 2>/dev/null || true
+    done
+
+    note "bringing up the ring (seed rpos-node-0; the rest join over sockets)"
+    $RC up -d --build --remove-orphans
+
+    read -r PROBE_DOMAIN PROBE_ANSWER < <(read_probe_domain)
+
+    note "waiting for health (up to ${HEALTH_TIMEOUT}s; probe=$PROBE_DOMAIN)"
+    local deadline healthy probe
+    deadline=$(( $(date +%s) + HEALTH_TIMEOUT ))
+    while :; do
+        healthy=$($RC ps --format '{{.Name}} {{.Status}}' 2>/dev/null | grep -c 'healthy' || true)
+        probe=""
+        if [ "$healthy" -ge "$N" ]; then
+            probe=$(docker run --rm --network "$RINGNET" rpos-node:latest python -c "
+import socket, dns.message, dns.query, dns.rdatatype as t
+q=dns.message.make_query('$PROBE_DOMAIN',t.A)
+try:
+    ip=socket.gethostbyname('rpos-node-0')   # dns.query.udp needs an IP, not a hostname
+    r=dns.query.udp(q,ip,port=$DNS_PORT,timeout=5)
+    print(next((x.address for rr in r.answer for x in rr), ''))
+except Exception:
+    print('')
+" 2>/dev/null | tr -d '[:space:]' || true)
+        fi
+        if [ "$healthy" -ge "$N" ] && [ "$probe" = "$PROBE_ANSWER" ]; then
+            echo "  $healthy/$N nodes healthy; ring resolves ($PROBE_DOMAIN -> $probe)"
+            break
+        fi
+        [ "$(date +%s)" -lt "$deadline" ] || fail "ring not healthy within ${HEALTH_TIMEOUT}s (healthy=$healthy/$N, probe='${probe:-<none>}')"
+        sleep 3
+    done
+
+    if [ "$NO_NETEM" -eq 1 ]; then
+        note "skipping tc netem (--no-netem)"
+    else
+        note "applying tc netem (regions=$REGIONS same=${SAME_MS}ms cross=${CROSS_MS}ms) on the ring"
+        REGIONS="$REGIONS" SAME_MS="$SAME_MS" CROSS_MS="$CROSS_MS" NETWORK="$RINGNET" ./netem.sh apply
+        NETEM_ON=1
+    fi
+
+    # run query_gen INSIDE the ring network (round-robin across all node DNS ports)
+    ring_load() {   # <out-host-path> <seconds> <seed> <name>
+        local out="$1" secs="$2" seed="$3"; local out_dir out_base
+        out_dir="$(cd "$(dirname "$out")" && pwd)"; out_base="$(basename "$out")"
+        docker run --rm --network "$RINGNET" -v "$REPO_ROOT":/repo -v "$out_dir":/out -w /repo/testbed \
+            rpos-node:latest \
+            python query_gen.py --qps "$QPS" --duration "$secs" --alpha "$ALPHA" --seed "$seed" \
+                --ring-nodes "$N" --ring-dns-port "$DNS_PORT" --output "/out/$out_base"
+    }
+
+    if is_pos "$WARMUP"; then
+        note "warm-up: ${WARMUP}s of ring load (populates DHT/caches; CSV discarded)"
+        ring_load "$WARMUP_CSV" "$WARMUP" "$((SEED + 1))" || true
+    fi
+    # clear per-node query logs so aggregated hops reflect the MEASURED run only
+    for j in $(seq 0 $((N - 1))); do : > "$REPO_ROOT/results/ring/$j/queries.csv" 2>/dev/null || true; done
+
+    note "measured run: ${QPS} qps for ${DURATION}s -> $CSV"
+    ring_load "$CSV" "$DURATION" "$SEED"
+
+    note "summary"
+    summarise "$CSV" "$OUTDIR/experiments.csv" "$RUN_TAG" "$N" "$QPS" "$DURATION" \
+              "$WARMUP" "$SEED" "nodes" "$NETEM_ON" "$REPO_ROOT"
+
+    note "chord hop counts (from each node's node/results/queries.csv)"
+    python3 - "$REPO_ROOT/results/ring" <<'PY'
+import csv, glob, os, statistics, sys
+root = sys.argv[1]
+hops = []
+for p in glob.glob(os.path.join(root, "*", "queries.csv")):
+    try:
+        with open(p) as f:
+            for r in csv.DictReader(f):
+                hops.append(int(r["hops"]))
+    except Exception:
+        pass
+if not hops:
+    print("[hops] no per-node query rows found (is node/results bind-mounted?)")
+else:
+    hops.sort()
+    med = statistics.median(hops)
+    dist = {h: hops.count(h) for h in sorted(set(hops))}
+    print(f"[hops] n={len(hops)} median={med} mean={statistics.mean(hops):.2f} "
+          f"min={hops[0]} max={hops[-1]} dist={dist}")
+PY
+}
+
 # ----- arg parsing ----------------------------------------------------------------------------
 while [ $# -gt 0 ]; do
     case "$1" in
         --nodes)          N="$2"; shift 2 ;;
+        --mode)           EXPMODE="$2"; shift 2 ;;
         --qps)            QPS="$2"; shift 2 ;;
         --duration)       DURATION="$2"; shift 2 ;;
         --warmup)         WARMUP="$2"; shift 2 ;;
@@ -102,6 +267,27 @@ case "$N" in ''|*[!0-9]*) fail "--nodes must be a positive integer (got '$N')" ;
 # ----- preconditions --------------------------------------------------------------------------
 docker info >/dev/null 2>&1 || fail "Docker daemon not running — start Docker Desktop and retry."
 
+# ----- pick a MANIFEST domain + expected answer (health + probe; used by both modes) ----------
+read_probe_domain() {
+    python3 - "$MANIFEST" <<'PY'
+import json, sys
+try:
+    recs = json.load(open(sys.argv[1]))["records"]
+except Exception:
+    print("google.com 10.0.0.1"); raise SystemExit
+d = "google.com" if "google.com" in recs else next(iter(recs))
+print(d, recs[d]["answer_ip"])
+PY
+}
+
+# ----- EXPMODE dispatch -----------------------------------------------------------------------
+# nodes-mode is a self-contained path (own compose, bring-up, health gate, netem, teardown).
+case "$EXPMODE" in
+    nodes) run_nodes_mode; exit 0 ;;
+    host)  : ;;    # fall through to the Unbound-baseline path below
+    *)     fail "--mode must be 'host' (Unbound baseline) or 'nodes' (resolver ring), got '$EXPMODE'" ;;
+esac
+
 # Host mode needs dnspython on the host; if absent we can still run via the in-network fallback.
 HOST_PY_OK=0
 if python3 -c "import dns.query" >/dev/null 2>&1; then HOST_PY_OK=1; fi
@@ -131,20 +317,6 @@ teardown() {
     $COMPOSE down >/dev/null 2>&1 || true
 }
 trap teardown EXIT
-
-# ----- pick a MANIFEST domain + expected answer (for health + host probe) ---------------------
-# (the manifest is created by up.sh below if missing; read it after bring-up)
-read_probe_domain() {
-    python3 - "$MANIFEST" <<'PY'
-import json, sys
-try:
-    recs = json.load(open(sys.argv[1]))["records"]
-except Exception:
-    print("google.com 10.0.0.1"); raise SystemExit
-d = "google.com" if "google.com" in recs else next(iter(recs))
-print(d, recs[d]["answer_ip"])
-PY
-}
 
 # ----- 1. bring up ----------------------------------------------------------------------------
 note "bringing up the testbed with N=$N resolver node(s)"

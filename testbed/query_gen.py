@@ -34,8 +34,10 @@ reproducibility (CLAUDE.md §2).
 import argparse
 import bisect
 import csv
+import hashlib
 import json
 import random
+import socket
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -133,6 +135,35 @@ class ZipfSampler:
         return bisect.bisect_left(self._cum, x)
 
 
+# ---- ring addressing (nodes-mode). Mirrors node/run_node._pk_for + node/ids so the label
+# resolver_used=node-<ring-id> matches the actual container that served the query. Replicated
+# here (two tiny pure functions) to avoid importing the whole node stack into the generator.
+def _pk_for(i: int) -> bytes:
+    return b"node-pk-" + i.to_bytes(4, "big") + b"\x00" * 21
+
+
+def _ring_label(i: int) -> str:
+    rid = int.from_bytes(hashlib.sha256(_pk_for(i)).digest(), "big") % (1 << 160)
+    return "node-" + format(rid, "x")[:12]
+
+
+_ADDR_CACHE: dict[str, str] = {}
+
+
+def _resolve_host(host: str) -> str:
+    """dns.query.udp needs an IP, not a hostname. Resolve ring node names (rpos-node-<j>) via
+    Docker DNS once and cache. An already-numeric host passes straight through."""
+    ip = _ADDR_CACHE.get(host)
+    if ip is None:
+        try:
+            socket.inet_aton(host)
+            ip = host
+        except OSError:
+            ip = socket.gethostbyname(host)   # gaierror (subclass of OSError) if unresolvable
+        _ADDR_CACHE[host] = ip
+    return ip
+
+
 def run_query(resolver: str, port: int, domain: str, timeout: float) -> tuple[float, bool]:
     """Send one A query over UDP. Returns (latency_ms, success).
 
@@ -142,7 +173,7 @@ def run_query(resolver: str, port: int, domain: str, timeout: float) -> tuple[fl
     query = dns.message.make_query(domain, dns.rdatatype.A)
     start = time.perf_counter()
     try:
-        resp = dns.query.udp(query, resolver, port=port, timeout=timeout)
+        resp = dns.query.udp(query, _resolve_host(resolver), port=port, timeout=timeout)
         latency_ms = (time.perf_counter() - start) * 1000.0
         ok = resp.rcode() == dns.rcode.NOERROR and any(
             rr.rdtype == dns.rdatatype.A for rr in resp.answer)
@@ -174,6 +205,14 @@ def main() -> int:
                     help="number of domains for the Tranco fallback (default 1000)")
     ap.add_argument("--max-workers", type=int, default=64,
                     help="max concurrent in-flight queries (default 64)")
+    # nodes-mode: round-robin queries across the resolver ring instead of a single resolver.
+    ap.add_argument("--ring-nodes", type=int, default=0,
+                    help="if >0, target N ring nodes (round-robin) instead of --resolver; "
+                         "resolver_used is labelled node-<ring-id> per served node")
+    ap.add_argument("--ring-prefix", default="rpos-node-",
+                    help="ring node hostname prefix (default rpos-node-)")
+    ap.add_argument("--ring-dns-port", type=int, default=5300,
+                    help="ring node DNS UDP port (default 5300)")
     args = ap.parse_args()
 
     if args.qps <= 0 or args.duration <= 0:
@@ -181,32 +220,42 @@ def main() -> int:
 
     domains = load_domains(args.manifest, args.tranco, args.count)
     sampler = ZipfSampler(len(domains), args.alpha, random.Random(args.seed))
-    resolver_label = args.resolver_name or f"{args.resolver}:{args.port}"
+
+    # Build the target list. Host-mode: one resolver. Nodes-mode: the resolver ring,
+    # round-robin, each row labelled by the ring node that actually served it.
+    if args.ring_nodes > 0:
+        targets = [(f"{args.ring_prefix}{j}", args.ring_dns_port, _ring_label(j))
+                   for j in range(args.ring_nodes)]
+        where = f"{args.ring_nodes} ring nodes ({args.ring_prefix}0..{args.ring_nodes - 1})"
+    else:
+        targets = [(args.resolver, args.port, args.resolver_name or f"{args.resolver}:{args.port}")]
+        where = targets[0][2]
 
     total = int(round(args.qps * args.duration))
     interval = 1.0 / args.qps
     print(f"[info] {len(domains)} domains; sending ~{total} queries at {args.qps} qps "
-          f"(~{args.duration}s) to {resolver_label} (alpha={args.alpha}, seed={args.seed})",
+          f"(~{args.duration}s) to {where} (alpha={args.alpha}, seed={args.seed})",
           file=sys.stderr)
 
     rows: list[tuple[float, str, str, float, bool]] = []
     rows_lock = Lock()
 
-    def dispatch(domain: str) -> None:
+    def dispatch(domain: str, host: str, port: int, label: str) -> None:
         sent = time.time()
-        latency_ms, ok = run_query(args.resolver, args.port, domain, args.timeout)
+        latency_ms, ok = run_query(host, port, domain, args.timeout)
         with rows_lock:
-            rows.append((sent, domain, resolver_label, latency_ms, ok))
+            rows.append((sent, domain, label, latency_ms, ok))
 
     t0 = time.perf_counter()
     with ThreadPoolExecutor(max_workers=args.max_workers) as pool:
         for i in range(total):
             domain = domains[sampler.sample()]
+            host, port, label = targets[i % len(targets)]   # round-robin across targets
             target = t0 + i * interval
             now = time.perf_counter()
             if target > now:
                 time.sleep(target - now)
-            pool.submit(dispatch, domain)
+            pool.submit(dispatch, domain, host, port, label)
         # ThreadPoolExecutor.__exit__ waits for all in-flight queries to finish.
 
     rows.sort(key=lambda r: r[0])   # chronological by send time

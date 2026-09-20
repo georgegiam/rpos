@@ -1,0 +1,3 @@
+# Generated per run by gen_nodes_compose.py (epic #24) — N-node ring compose, reproducible
+# from N + params, so not committed (CLAUDE.md §2). The generator is committed.
+docker-compose.nodes.yml
