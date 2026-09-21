@@ -55,7 +55,7 @@ these:
 | 2 | Build resolver node | **done** — epic #17 (all 8 sub-issues); see below |
 | 3 | Build testbed | **done** — N=32 emulation reliable (97.7% success, median hops 3, full finger convergence); Unbound baseline collected; N=64 deferred to Phase 5 simulator (testbed resource limit, not a protocol bug — see Phase 3) |
 | 4 | Sanity checks + baseline | **done** — hops match Chord theory (+0.5), Unbound baseline collected, N=32 stable over 3 runs, parameters frozen; see `results/PARAMETERS.md` |
-| 5 | Simulator for large scale | not started |
+| 5 | Simulator for large scale | in progress — #25 done (SimPy Chord ring model, `sim/chord_sim.py`) |
 | 6 | Performance experiments | not started |
 | 7 | Attack experiments | not started |
 | 8 | PoSpace security comparison (Chia) | not started |
@@ -253,7 +253,11 @@ DRG scheme is **imported** from `phase1/pospace_drg.py` (not copied); `rpos/rpos
 > results before scaling to N=1,000+. The emulation ceiling is **N=32** due to testbed resource
 > limits (find_successor traffic starves stabilize at N=64); this is a known harness limitation,
 > not a protocol issue. So the simulator carries the large-N (incl. N=64) scaling evidence.
-- [ ] SimPy model of the same protocol, reusing protocol logic where possible.
+- [x] SimPy model of the same protocol, reusing protocol logic where possible. → `sim/chord_sim.py`
+      (#25): converged Chord ring built analytically; `route()` is an exact port of `node/chord.py`'s
+      iterative `find_successor` (reuses `node/ids.py`); N=1000 mean 4.82 hops vs theory 4.98,
+      100% owner-correct, builds at N=10k. Pure-Chord hops match theory, **not** the emulation
+      median — the +0.5/+3 offsets are replica/fallback effects added in #26.
 - [ ] Calibrate with per-hop processing times and message sizes measured in emulation.
 - [ ] Validate: at N=8 and N=32 the simulator must closely match emulation (report the match),
       then check N=64 in-sim behaves as theory predicts.

@@ -1,0 +1,9 @@
+# Python dependencies for the Phase 2–8 work (Python 3.11+).
+# Emulation/node code uses dnspython + cryptography; analysis uses pandas/matplotlib/numpy;
+# the Phase 5 simulator (sim/) uses simpy.
+simpy>=4.1,<5
+dnspython>=2.6
+cryptography>=42
+pandas>=2.2
+matplotlib>=3.8
+numpy>=1.26
