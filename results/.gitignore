@@ -7,3 +7,5 @@
 !experiments.csv
 # Phase 5 #29 deliverable: simulator-vs-emulation calibration table (sim/calibrate.py).
 !calibration.csv
+# Phase 5 #30 deliverable: large-scale simulator results (sim/scale_sim.py).
+!sim_scale.csv
