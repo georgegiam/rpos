@@ -1,0 +1,2 @@
+n,update_qps,duration,warmup,seed,domains,zipf_alpha,rows,updates,ttl_refreshes,committed,aborted,rt_mean,msg_mean,entries_total,ledger_len,p50_ms,p95_ms,p99_ms,p50_refresh_ms,p95_refresh_ms
+32,1,7200,30,20260919,1000,1,14949,7200,7749,14949,0,10.033,20.066,44847,47937,426.500,528.500,618.500,432.500,528.500

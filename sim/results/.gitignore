@@ -1,5 +1,7 @@
 # Phase 5 simulator outputs. Per-run per-query CSVs are regenerated from a fixed seed
 # (CLAUDE.md §2), so not committed; the running summary is kept (cf. results/experiments.csv).
 query_sim_N*.csv
+ledger_sim_N*.csv
 !.gitkeep
 !query_sim_summary.csv
+!ledger_sim_summary.csv

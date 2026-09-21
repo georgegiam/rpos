@@ -55,7 +55,7 @@ these:
 | 2 | Build resolver node | **done** — epic #17 (all 8 sub-issues); see below |
 | 3 | Build testbed | **done** — N=32 emulation reliable (97.7% success, median hops 3, full finger convergence); Unbound baseline collected; N=64 deferred to Phase 5 simulator (testbed resource limit, not a protocol bug — see Phase 3) |
 | 4 | Sanity checks + baseline | **done** — hops match Chord theory (+0.5), Unbound baseline collected, N=32 stable over 3 runs, parameters frozen; see `results/PARAMETERS.md` |
-| 5 | Simulator for large scale | in progress — #25 done (Chord ring, `sim/chord_sim.py`) + #26 done (query path, `sim/query_sim.py`); calibration (#29) next |
+| 5 | Simulator for large scale | in progress — #25 done (Chord ring, `sim/chord_sim.py`) + #26 done (query path, `sim/query_sim.py`) + #27 done (ledger/update path, `sim/ledger_sim.py`); calibration (#29) next |
 | 6 | Performance experiments | not started |
 | 7 | Attack experiments | not started |
 | 8 | PoSpace security comparison (Chia) | not started |
