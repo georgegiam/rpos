@@ -55,7 +55,7 @@ these:
 | 2 | Build resolver node | **done** — epic #17 (all 8 sub-issues); see below |
 | 3 | Build testbed | **done** — N=32 emulation reliable (97.7% success, median hops 3, full finger convergence); Unbound baseline collected; N=64 deferred to Phase 5 simulator (testbed resource limit, not a protocol bug — see Phase 3) |
 | 4 | Sanity checks + baseline | **done** — hops match Chord theory (+0.5), Unbound baseline collected, N=32 stable over 3 runs, parameters frozen; see `results/PARAMETERS.md` |
-| 5 | Simulator for large scale | in progress — #25 done (SimPy Chord ring model, `sim/chord_sim.py`) |
+| 5 | Simulator for large scale | in progress — #25 done (Chord ring, `sim/chord_sim.py`) + #26 done (query path, `sim/query_sim.py`); calibration (#29) next |
 | 6 | Performance experiments | not started |
 | 7 | Attack experiments | not started |
 | 8 | PoSpace security comparison (Chia) | not started |
@@ -258,6 +258,15 @@ DRG scheme is **imported** from `phase1/pospace_drg.py` (not copied); `rpos/rpos
       iterative `find_successor` (reuses `node/ids.py`); N=1000 mean 4.82 hops vs theory 4.98,
       100% owner-correct, builds at N=10k. Pure-Chord hops match theory, **not** the emulation
       median — the +0.5/+3 offsets are replica/fallback effects added in #26.
+- [x] DNS query path (Algorithm 2). → `sim/query_sim.py` (#26): layers cache → DHT (primary + s=3
+      replicas, majority vote) → fallback (iterative resolution + store-back) on the #25 ring,
+      under a Zipf α=1.0 workload over the same Tranco list. Hops match the emulation `queries.csv`
+      accounting (cache_hit=0, dht_hit=route hops, fallback=route hops+3); cold-start warming
+      (empty DHT → warm-up → measure) reproduces the realistic outcome mixture. **Model only —
+      the placeholder per-leg delays are NOT tuned to emulation; numeric calibration is #29.**
+      N=32 result (seed 20260919, emergent — not fitted): outcomes 22% cache / 47% dht / 32%
+      fallback, hop **median 3** (== emulation), p50/p95/p99 268/770/962 ms. Reproducible;
+      `sim/results/query_sim_summary.csv` keeps the summary row.
 - [ ] Calibrate with per-hop processing times and message sizes measured in emulation.
 - [ ] Validate: at N=8 and N=32 the simulator must closely match emulation (report the match),
       then check N=64 in-sim behaves as theory predicts.
