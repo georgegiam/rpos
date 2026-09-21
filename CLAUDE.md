@@ -55,7 +55,7 @@ these:
 | 2 | Build resolver node | **done** — epic #17 (all 8 sub-issues); see below |
 | 3 | Build testbed | **done** — N=32 emulation reliable (97.7% success, median hops 3, full finger convergence); Unbound baseline collected; N=64 deferred to Phase 5 simulator (testbed resource limit, not a protocol bug — see Phase 3) |
 | 4 | Sanity checks + baseline | **done** — hops match Chord theory (+0.5), Unbound baseline collected, N=32 stable over 3 runs, parameters frozen; see `results/PARAMETERS.md` |
-| 5 | Simulator for large scale | in progress — #25 done (Chord ring, `sim/chord_sim.py`) + #26 done (query path, `sim/query_sim.py`) + #27 done (ledger/update path, `sim/ledger_sim.py`); calibration (#29) next |
+| 5 | Simulator for large scale | in progress — #25 done (Chord ring, `sim/chord_sim.py`) + #26 done (query path, `sim/query_sim.py`) + #27 done (ledger/update path, `sim/ledger_sim.py`) + #28 done (churn, `sim/churn_sim.py`); calibration (#29) next |
 | 6 | Performance experiments | not started |
 | 7 | Attack experiments | not started |
 | 8 | PoSpace security comparison (Chia) | not started |
@@ -253,6 +253,16 @@ DRG scheme is **imported** from `phase1/pospace_drg.py` (not copied); `rpos/rpos
 > results before scaling to N=1,000+. The emulation ceiling is **N=32** due to testbed resource
 > limits (find_successor traffic starves stabilize at N=64); this is a known harness limitation,
 > not a protocol issue. So the simulator carries the large-N (incl. N=64) scaling evidence.
+- [x] **Churn (#28):** nodes join/leave with exponential session times (birth–death, equilibrium
+      ≈ N); a departed node's successor absorbs its chunks each 1.0 s maintenance round. → `sim/churn_sim.py`.
+      Sweep over mean session length → the deliverable curve `sim/results/churn_sim_curve.csv`.
+      **Model:** data-availability only (a chunk is lost iff all s=3 replicas depart within one repair
+      window before re-replication); **headline = raw DHT lookup success rate** (fallback would
+      recover misses — reported as a secondary count, not folded in, or the curve flattens).
+      Result (N=100, repair 1 s, 1800 s, seed 20260919): success 100% for mean session ≥120 s,
+      falling to 86%/70%/43% at 30/15/10 s. **Out of scope (flagged):** stale-routing/finger-staleness
+      failures (→ Phase 6 A6) and numeric latency calibration (→ #29). Reuses `ChordRing`
+      (new `ids=`/`build_fingers=False` path) + `_replica_set`/`load_domains` from the sibling sims.
 - [x] SimPy model of the same protocol, reusing protocol logic where possible. → `sim/chord_sim.py`
       (#25): converged Chord ring built analytically; `route()` is an exact port of `node/chord.py`'s
       iterative `find_successor` (reuses `node/ids.py`); N=1000 mean 4.82 hops vs theory 4.98,

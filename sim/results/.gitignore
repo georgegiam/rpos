@@ -2,6 +2,8 @@
 # (CLAUDE.md §2), so not committed; the running summary is kept (cf. results/experiments.csv).
 query_sim_N*.csv
 ledger_sim_N*.csv
+churn_sim_N*.csv
 !.gitkeep
 !query_sim_summary.csv
 !ledger_sim_summary.csv
+!churn_sim_curve.csv

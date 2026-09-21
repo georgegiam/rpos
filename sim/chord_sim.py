@@ -87,24 +87,44 @@ class ChordRing:
         proc_delay_ms: float = DEFAULT_PROC_DELAY_MS,
         intra_ms: float = DEFAULT_INTRA_MS,
         inter_ms: float = DEFAULT_INTER_MS,
+        ids: list[int] | None = None,
+        build_fingers: bool = True,
     ) -> None:
-        if n < 1:
-            raise ValueError("n must be >= 1")
-        self.n = n
+        # ``ids`` (optional): use this explicit node-id set instead of generating one from
+        #   (n, seed). ``sim/churn_sim.py`` (#28) uses it to rebuild a converged ring over the
+        #   *currently-live* subset after each join/leave, reusing this class's placement /
+        #   successor-list logic verbatim rather than duplicating it. When given, ``n`` is
+        #   ignored and taken from the id set.
+        # ``build_fingers`` (optional): skip the O(N·M) finger-table build when a caller needs
+        #   only owner / successor-list placement (churn availability), not multi-hop routing.
+        #   ``route``/``closest_preceding`` stay correct with empty fingers (they fall back to the
+        #   successor list); the default True preserves the #25/#26/#27 behaviour exactly.
+        if ids is not None:
+            uniq = sorted(set(ids))
+            if not uniq:
+                raise ValueError("ids must be non-empty")
+            self.ids = uniq
+            self.n = len(uniq)
+        else:
+            if n < 1:
+                raise ValueError("n must be >= 1")
+            self.n = n
+            self.ids = self._generate_ids(n, seed)      # sorted ascending
         self.seed = seed
         self.regions = max(1, regions)
         self.proc_delay_ms = proc_delay_ms
         self.intra_ms = intra_ms
         self.inter_ms = inter_ms
 
-        self.ids = self._generate_ids(n, seed)          # sorted ascending
         self.pos = {nid: i for i, nid in enumerate(self.ids)}
         # Region assigned by sorted index, deterministic (PARAMETERS.md §1).
         self.region = {nid: i % self.regions for i, nid in enumerate(self.ids)}
 
         # Converged routing state, computed analytically (no stabilize protocol).
         self.succ_list: dict[int, list[int]] = {nid: self._compute_succ_list(nid) for nid in self.ids}
-        self.fingers: dict[int, list[int]] = {nid: self._compute_fingers(nid) for nid in self.ids}
+        self.fingers: dict[int, list[int]] = (
+            {nid: self._compute_fingers(nid) for nid in self.ids} if build_fingers else {}
+        )
 
     # ---------- construction helpers ----------
     @staticmethod
@@ -144,7 +164,7 @@ class ChordRing:
 
     def closest_preceding(self, node_id: int, key: int) -> int:
         """Highest node in node_id's tables strictly preceding ``key`` (port of chord.py)."""
-        for f in reversed(self.fingers[node_id]):
+        for f in reversed(self.fingers.get(node_id, ())):   # empty when build_fingers=False
             if f != node_id and in_interval(f, node_id, key):
                 return f
         for s in reversed(self.succ_list[node_id]):
@@ -257,6 +277,31 @@ def _run_self_test() -> int:
     if s["max"] > bound:
         print(f"FAIL: N=1000 max hops {s['max']} exceeds O(log N) bound {bound:.1f}")
         ok = False
+
+    # (2b) Explicit-ids construction (used by churn_sim #28) is equivalent to generated-ids.
+    #      * A ring built from an existing ring's id set routes IDENTICALLY (full fingers).
+    #      * build_fingers=False (the churn availability path) preserves owner/successor-list
+    #        PLACEMENT — churn_sim resolves owners via successor_of, not multi-hop route, so that
+    #        is the invariant it relies on (multi-hop route needs fingers and is not used there).
+    base = stats_by_n[1000]["ring"]
+    same = ChordRing(0, ids=base.ids, seed=DEFAULT_SEED)             # n ignored when ids given
+    lite = ChordRing(0, ids=base.ids, seed=DEFAULT_SEED, build_fingers=False)
+    if not (same.ids == base.ids == lite.ids and same.succ_list == base.succ_list == lite.succ_list):
+        print("FAIL: explicit-ids ring has different ids/successor-list placement")
+        ok = False
+    rng = random.Random(DEFAULT_SEED ^ 0xC0FFEE)
+    for _ in range(500):
+        origin = rng.choice(base.ids)
+        key = rng.randrange(RING_SIZE)
+        rr_base = base.route(origin, key)
+        if same.route(origin, key) != rr_base:
+            print("FAIL: explicit-ids ring does not route identically to generated-ids ring")
+            ok = False
+            break
+        if lite.successor_of(key) != rr_base.responsible:
+            print("FAIL: build_fingers=False changed the resolved owner (successor_of)")
+            ok = False
+            break
 
     # (3) SimPy timing smoke test (skipped cleanly if simpy is not installed).
     try:
