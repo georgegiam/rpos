@@ -2,3 +2,6 @@
 # fixed seed on each run (CLAUDE.md §2), so not committed. The directory itself is kept.
 *.csv
 !.gitkeep
+# Phase 4 committed deliverables (frozen baseline + running summary; not per-run outputs).
+!baseline_unbound.csv
+!experiments.csv

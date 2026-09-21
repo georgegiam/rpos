@@ -54,7 +54,7 @@ these:
 | 1 | PoSpace risk check | **done** — see below |
 | 2 | Build resolver node | **done** — epic #17 (all 8 sub-issues); see below |
 | 3 | Build testbed | **done** — N=32 emulation reliable (97.7% success, median hops 3, full finger convergence); Unbound baseline collected; N=64 deferred to Phase 5 simulator (testbed resource limit, not a protocol bug — see Phase 3) |
-| 4 | Sanity checks + baseline | not started |
+| 4 | Sanity checks + baseline | **done** — hops match Chord theory (+0.5), Unbound baseline collected, N=32 stable over 3 runs, parameters frozen; see `results/PARAMETERS.md` |
 | 5 | Simulator for large scale | not started |
 | 6 | Performance experiments | not started |
 | 7 | Attack experiments | not started |
@@ -232,12 +232,21 @@ DRG scheme is **imported** from `phase1/pospace_drg.py` (not copied); `rpos/rpos
     body is read. Closes the transport as a Phase-7 attack surface. See `node/socket_net.py`.
   - Per-run CSVs are git-ignored (seed-reproducible per §2); `experiments.csv` keeps the summary row.
 
-### Phase 4 — Sanity checks + baseline
-- [ ] Measured hop counts vs Chord theory (≈½ log₂N); mismatch = bug.
-- [ ] Unbound baseline: latency and max queries/sec.
-- [ ] Repeat one run 3–5× for stability.
-- [ ] Freeze parameter defaults (s, δ, delays, workload) and write them down.
-- **Done when:** numbers are stable, sensible, and the baseline exists.
+### Phase 4 — Sanity checks + baseline  *(done — see `results/PARAMETERS.md`)*
+- [x] Measured hop counts vs Chord theory (≈½ log₂N); mismatch = bug. → N=8: theory 1.5,
+      measured median 2 (+0.5); N=32: theory 2.5, measured median 3 (+0.5). Both well under the
+      1.5-hop bug threshold → routing matches Chord, no bug.
+- [x] Unbound baseline: latency and max queries/sec. → reference (10 qps) p50 3.5 / p95 132.9 /
+      p99 214.9 ms; **max sustained ≥99% = 200 qps** (100.0%), drops to 96.7% at 400 qps, so
+      saturation is between 200–400 qps. Raw: `results/baseline_unbound.csv`. (Not pushed past
+      400 qps: at ≥800 qps the closed-loop generator, not Unbound, is the bottleneck.)
+- [x] Repeat one run 3–5× for stability. → N=32 ×3: 99.3% / 100% / 100%, p50 524.5 / 491.9 /
+      511.7 ms (success spread <10%, p50 spread <2×) → **stable**; hop median 3 every run.
+- [x] Freeze parameter defaults (s, δ, delays, workload) and write them down. →
+      `results/PARAMETERS.md` (s=3, δ=2 s, 5/50 ms two-tier, 5 s query timeout, MAINT 1.0 s,
+      finger refresh ~4 s, challenge ~5 s, Zipf α=1.0 / 1000 domains, warm-up 30 s, seed
+      20260919, N=32 ceiling).
+- **Done when:** numbers are stable, sensible, and the baseline exists. → **met.**
 
 ### Phase 5 — Simulator for large scale  *(answers (iii))*  *(runs in parallel, Dec–mid-Jan)*
 > **Calibration note:** the simulator must be calibrated against **N=8 and N=32** emulation
