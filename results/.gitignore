@@ -9,3 +9,9 @@
 !calibration.csv
 # Phase 5 #30 deliverable: large-scale simulator results (sim/scale_sim.py).
 !sim_scale.csv
+# Phase 6 A1 deliverable: latency-vs-N table (experiments/a1_latency_vs_n.py). The figure
+# (fig_A1_latency_vs_N.png) and A1_NOTES.md are not *.csv, so already tracked.
+!A1_latency_vs_N.csv
+# Phase 6 A1 raw per-run snapshots (experiments/run_a1.sh) — regenerable from the fixed seed
+# (CLAUDE.md §2), so not committed; A1_latency_vs_N.csv is the committed summary.
+a1/

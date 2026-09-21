@@ -56,7 +56,7 @@ these:
 | 3 | Build testbed | **done** — N=32 emulation reliable (97.7% success, median hops 3, full finger convergence); Unbound baseline collected; N=64 deferred to Phase 5 simulator (testbed resource limit, not a protocol bug — see Phase 3) |
 | 4 | Sanity checks + baseline | **done** — hops match Chord theory (+0.5), Unbound baseline collected, N=32 stable over 3 runs, parameters frozen; see `results/PARAMETERS.md` |
 | 5 | Simulator for large scale | **done** — #25 (Chord ring, `sim/chord_sim.py`) + #26 (query path, `sim/query_sim.py`) + #27 (ledger/update, `sim/ledger_sim.py`) + #28 (churn, `sim/churn_sim.py`) + #29 (calibration vs N=8/N=32, `sim/calibrate.py` → `results/calibration.csv`, gated metrics ≤8%) + #30 (scale N=1k/5k/10k, `sim/scale_sim.py` → `results/sim_scale.csv`, routing hops match ½·log₂N within +1); simulator matches emulation and runs at 10k |
-| 6 | Performance experiments | not started |
+| 6 | Performance experiments | **in progress** — A1 (latency vs N) done: #32, `experiments/run_a1.sh` + `experiments/a1_latency_vs_n.py` → `results/A1_latency_vs_N.csv` + `fig_A1_latency_vs_N.png` + `A1_NOTES.md`; A2–A7 not started |
 | 7 | Attack experiments | not started |
 | 8 | PoSpace security comparison (Chia) | not started |
 | 9 | Writing | not started |
@@ -315,7 +315,18 @@ DRG scheme is **imported** from `phase1/pospace_drg.py` (not copied); `rpos/rpos
 
 ### Phase 6 — Performance experiments  *(answers (iii))*
 Run each 3–5×; report averages with error bars and percentiles.
-- [ ] **A1 Latency vs N:** p50/p95/p99, split by cache hit / DHT hit / fallback, vs Unbound.
+- [x] **A1 Latency vs N:** p50/p95/p99, split by cache hit / DHT hit / fallback, vs Unbound. →
+      #32; `experiments/run_a1.sh` (collect) + `experiments/a1_latency_vs_n.py` (join + table +
+      plot) → `results/A1_latency_vs_N.csv`, `results/fig_A1_latency_vs_N.png`,
+      `results/A1_NOTES.md`. N=4/8/16/32 ×3, nodes-mode, 10 qps. **Latency is client-observed;
+      the cache/dht/fallback split comes from joining the client CSV to the node-side
+      `queries.csv` per (node, domain) — join 99.9–100%, reported not hidden.** Overall p50 4.8
+      (N4, cache-dominated) → 270.6 (N8) → 335.3 (N16) → 511.3 (N32) ms — matches
+      `experiments.csv` within run variance. Split ordered cache (~1–3 ms, flat) < dht_hit
+      (319→487 ms) < fallback (497→1022 ms) at every N. Unbound flat baseline p50 3.5 / p95 132.6
+      / p99 214.3 ms (N-independent, drawn as a band). Sim cross-check: overall p50 ≤7.6% at
+      N=8/N=32 (per-outcome looser, non-gating; cache-hit % blows up only because emulation cache
+      is ~1 ms vs the sim's 18 ms proc floor — negligible in absolute terms).
 - [ ] **A2 Throughput:** raise load to saturation, several N.
 - [ ] **A3 Scalability:** throughput and per-node load as N grows (emulation + simulation).
 - [ ] **A4 Replication cost:** s = 3, 5, 7.
