@@ -56,7 +56,7 @@ these:
 | 3 | Build testbed | **done** — N=32 emulation reliable (97.7% success, median hops 3, full finger convergence); Unbound baseline collected; N=64 deferred to Phase 5 simulator (testbed resource limit, not a protocol bug — see Phase 3) |
 | 4 | Sanity checks + baseline | **done** — hops match Chord theory (+0.5), Unbound baseline collected, N=32 stable over 3 runs, parameters frozen; see `results/PARAMETERS.md` |
 | 5 | Simulator for large scale | **done** — #25 (Chord ring, `sim/chord_sim.py`) + #26 (query path, `sim/query_sim.py`) + #27 (ledger/update, `sim/ledger_sim.py`) + #28 (churn, `sim/churn_sim.py`) + #29 (calibration vs N=8/N=32, `sim/calibrate.py` → `results/calibration.csv`, gated metrics ≤8%) + #30 (scale N=1k/5k/10k, `sim/scale_sim.py` → `results/sim_scale.csv`, routing hops match ½·log₂N within +1); simulator matches emulation and runs at 10k |
-| 6 | Performance experiments | **in progress** — A1 (latency vs N) done: #32, `experiments/run_a1.sh` + `experiments/a1_latency_vs_n.py` → `results/A1_latency_vs_N.csv` + `fig_A1_latency_vs_N.png` + `A1_NOTES.md`; A2–A7 not started |
+| 6 | Performance experiments | **in progress** — A1 (latency vs N) done: #32; A2 (throughput/saturation, N=32) done: #33, `experiments/run_a2.sh` + `experiments/a2_throughput.py` → `results/A2_throughput.csv` + `fig_A2_throughput.png` + `A2_NOTES.md` (saturation = 100 qps); A3–A7 not started |
 | 7 | Attack experiments | not started |
 | 8 | PoSpace security comparison (Chia) | not started |
 | 9 | Writing | not started |
@@ -327,7 +327,18 @@ Run each 3–5×; report averages with error bars and percentiles.
       / p99 214.3 ms (N-independent, drawn as a band). Sim cross-check: overall p50 ≤7.6% at
       N=8/N=32 (per-outcome looser, non-gating; cache-hit % blows up only because emulation cache
       is ~1 ms vs the sim's 18 ms proc floor — negligible in absolute terms).
-- [ ] **A2 Throughput:** raise load to saturation, several N.
+- [x] **A2 Throughput:** ramp offered load to saturation at N=32. → #33;
+      `experiments/run_a2.sh` (collect: one ring per sweep, warm at 10 qps then ramp
+      {10,25,50,100,150,200} qps × 30 s ascending, 3 sweeps) + `experiments/a2_throughput.py`
+      (aggregate + saturation marker + plot) → `results/A2_throughput.csv` +
+      `fig_A2_throughput.png` + `A2_NOTES.md`. **Saturation point = 100 qps** (first level < 95%
+      success): success 100→99.2→97.0 (≤50 qps) then **82.8** (100) → 75.1 → 75.6% (150/200) —
+      ~¼ of Unbound's load (Unbound holds 100% to 200 qps). `achieved_qps` tracks offered to
+      ±0.03 qps at every level (send-span-derived), so the failures are **genuine ring
+      saturation, not a generator cap** — the key check vs the Unbound baseline's generator-limited
+      400-qps stop. Flagged: p95-of-successful *falls* under overload (cache hits survive, slow
+      DHT/fallback queries time out and drop from the success set) — success rate is the headline,
+      not latency-of-successful. Single-N=32 (emulation ceiling); multi-N scaling is A3.
 - [ ] **A3 Scalability:** throughput and per-node load as N grows (emulation + simulation).
 - [ ] **A4 Replication cost:** s = 3, 5, 7.
 - [ ] **A5 Updates:** commit latency, messages per update, ledger growth.
