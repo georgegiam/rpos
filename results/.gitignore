@@ -5,3 +5,5 @@
 # Phase 4 committed deliverables (frozen baseline + running summary; not per-run outputs).
 !baseline_unbound.csv
 !experiments.csv
+# Phase 5 #29 deliverable: simulator-vs-emulation calibration table (sim/calibrate.py).
+!calibration.csv

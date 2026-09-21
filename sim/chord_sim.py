@@ -56,9 +56,12 @@ _SAFETY_HOPS = M + SUCC_LIST_LEN + 4   # chord.py's transient-loop safety valve
 # Frozen defaults from results/PARAMETERS.md (Phase 4).
 DEFAULT_SEED = 20260919
 DEFAULT_REGIONS = 2
-DEFAULT_PROC_DELAY_MS = 1.0    # calibratable placeholder — per-hop CPU time is unmeasured (#29)
-DEFAULT_INTRA_MS = 5.0         # one-way, same region
-DEFAULT_INTER_MS = 50.0        # one-way, cross region
+DEFAULT_PROC_DELAY_MS = 18.0   # per-hop/RPC processing — CALIBRATED in #29 against N=8/N=32
+                               # emulation (see results/calibration.csv). Absorbs all unmodelled
+                               # per-hop cost (asyncio dispatch, JSON codec, TCP over the keep-alive
+                               # pool), not just pure CPU; was a 1.0 ms placeholder pre-calibration.
+DEFAULT_INTRA_MS = 5.0         # one-way, same region — MEASURED netem (PARAMETERS.md), frozen
+DEFAULT_INTER_MS = 50.0        # one-way, cross region — MEASURED netem (PARAMETERS.md), frozen
 
 
 @dataclass
@@ -196,18 +199,26 @@ class ChordRing:
 
     # ---------- timing primitive ----------
     def hop_delay_ms(self, a_id: int, b_id: int) -> float:
-        """One-way per-hop delay: processing + network (network by region pair)."""
+        """Per-hop delay: one destination-side processing term + a full network round trip.
+
+        A Chord routing hop is a ``find_successor`` **request/response RPC** — node ``a`` asks node
+        ``b`` and waits for the reply — so it costs two one-way network legs, not one. Charging the
+        RTT (rather than a single one-way leg) is the #29 latency calibration: with a one-way leg the
+        best processing-only fit stalled at ~17.6% error (N=32 latency undershoots because it has
+        more hops), and the RTT correction — which keeps the measured 5/50 ms netem legs frozen and
+        just counts both legs of the round trip — brings all N=8/N=32 latency metrics within ~8%
+        (results/calibration.csv). ``proc_delay_ms`` is the calibrated per-hop processing term.
+        """
         net = self.intra_ms if self.region[a_id] == self.region[b_id] else self.inter_ms
-        return self.proc_delay_ms + net
+        return self.proc_delay_ms + 2.0 * net
 
 
 def lookup_latency(env, ring: ChordRing, origin_id: int, key: int):
     """SimPy process: replay ``ring.route`` in simulated time.
 
-    Yields one ``env.timeout`` per hop and returns ``(RouteResult, latency_ms)``. Charges the
-    delay **one-way** per hop by default (matches the frozen 5/50 ms figures); whether a hop
-    should cost one-way or a full RTT is the main latency-calibration lever for #29 and is
-    controlled by the ring's delay parameters.
+    Yields one ``env.timeout`` per hop and returns ``(RouteResult, latency_ms)``. Each hop costs
+    ``hop_delay_ms`` — a full request/response RTT plus one processing term, the form #29 calibrated
+    against emulation (see ``hop_delay_ms``). The measured 5/50 ms netem legs stay frozen.
     """
     rr = ring.route(origin_id, key)
     latency = 0.0

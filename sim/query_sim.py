@@ -19,9 +19,13 @@ Design choices (locked for #26, stated openly per CLAUDE.md "flag, don't hide"):
   route hops + ``FALLBACK_STEPS`` (the "+3" referral offset, ``total_hops = hops + steps`` in
   query.py). This is the source of the +offsets that pure-Chord ``chord_sim`` deliberately omits.
 
-* **Model only — numeric calibration is deferred to #29.** All per-leg delay weights are named
-  module/instance constants seeded from the frozen ``chord_sim`` / ``PARAMETERS.md`` figures; they
-  are NOT tuned here to hit the emulation medians. #29 calibrates them against N=8/N=32 emulation.
+* **Calibrated against emulation (#29).** The per-leg delay weights are named module/instance
+  constants that ``sim/calibrate.py`` tuned against N=8/N=32 emulation (``results/calibration.csv``):
+  per-hop ``proc_delay_ms`` 1 -> 18 ms, ``FALLBACK_STEP_MS`` 50 -> 100 ms, and a routing hop is now
+  charged as a full RTT (``chord_sim.hop_delay_ms``), keeping the measured 5/50 ms netem legs frozen.
+  All latency metrics land within ~8% at both N. (Hops are topology, not delay: N=32 matches; N=8's
+  median is one below emulation because the sim routes on a perfectly-converged ring — a documented
+  finger-convergence idealisation, see calibration.csv / CLAUDE.md, not a calibration failure.)
 
 * **Independent per-query latency (no node service-capacity contention).** Latency is a
   deterministic analytic sum of the legs a query traverses; throughput/saturation contention is
@@ -61,6 +65,7 @@ if _REPO_ROOT not in sys.path:
 
 from node.ids import RING_SIZE, chunk_id  # noqa: E402  (after sys.path)
 from sim.chord_sim import (  # noqa: E402
+    DEFAULT_PROC_DELAY_MS,
     DEFAULT_SEED,
     ChordRing,
     RouteResult,
@@ -71,12 +76,13 @@ from sim.chord_sim import (  # noqa: E402
 S = 3                       # replication factor == node/storage.py S
 FALLBACK_STEPS = 3          # iterative-resolution referral steps == node/query.py IterativeResolver.steps
 
-# ---- per-leg delay weights — placeholders, the #29 calibration levers ------------------
+# ---- per-leg delay weights — CALIBRATED in #29 (results/calibration.csv) ----------------
 # A DHT RPC is a request+response round trip; we charge two one-way network legs plus one
-# server-side processing delay. Whether replica reads should cost one-way vs full RTT is the
-# primary latency-calibration lever (as chord_sim.lookup_latency already flags) and lives in #29.
-VOTE_PROC_MS = 0.5          # majority-vote CPU after the replica reads return (placeholder, #29)
-FALLBACK_STEP_MS = 50.0     # per referral step to the upstream hierarchy (placeholder, #29)
+# server-side processing delay (chord_sim.hop_delay_ms now does the same for routing hops).
+# These two weights were calibrated with proc_delay against N=8/N=32 emulation (all latency
+# metrics within ~8%); VOTE_PROC_MS stayed at its 0.5 ms default, FALLBACK_STEP_MS moved 50 -> 100.
+VOTE_PROC_MS = 0.5          # majority-vote CPU after the replica reads return (calibrated #29)
+FALLBACK_STEP_MS = 100.0    # per referral step to the upstream hierarchy (calibrated #29)
 
 # ---- workload defaults (mirror results/PARAMETERS.md) ----------------------------------
 TTL_LADDER_S = [300, 600, 900, 1800, 3600]   # discrete zone TTLs (testbed/dns/generate_zones.py)
@@ -153,11 +159,13 @@ class QuerySim:
         seed: int = DEFAULT_SEED,
         fallback_steps: int = FALLBACK_STEPS,
         fallback_step_ms: float = FALLBACK_STEP_MS,
+        vote_proc_ms: float = VOTE_PROC_MS,
     ) -> None:
         self.ring = ring
         self.domains = domains
         self.fallback_steps = fallback_steps
         self.fallback_step_ms = fallback_step_ms
+        self.vote_proc_ms = vote_proc_ms
 
         # Cold start: empty DHT, empty per-node caches.
         self.dht_stored: set[int] = set()
@@ -211,7 +219,7 @@ class QuerySim:
         ttl_ms = self.ttl_ms.get(domain, 1000.0 * TTL_LADDER_S[0])
 
         if cid in self.dht_stored:
-            latency = dht_read_lat + VOTE_PROC_MS
+            latency = dht_read_lat + self.vote_proc_ms
             cache[domain] = now_ms + ttl_ms
             return QueryRecord(now_ms, domain, origin_label, rr.hops, "dht_hit",
                                f"{k}/{k}", latency)
@@ -262,11 +270,21 @@ def run_workload(
     n_domains: int = DEFAULT_DOMAINS,
     zipf_alpha: float = DEFAULT_ZIPF_ALPHA,
     seed: int = DEFAULT_SEED,
+    proc_delay_ms: float = DEFAULT_PROC_DELAY_MS,
+    vote_proc_ms: float = VOTE_PROC_MS,
+    fallback_step_ms: float = FALLBACK_STEP_MS,
 ) -> tuple[QuerySim, list[QueryRecord]]:
-    """Run the query workload; return (sim, measurement-window records)."""
-    ring = ChordRing(n, seed=seed)
+    """Run the query workload; return (sim, measurement-window records).
+
+    The three processing-delay levers (``proc_delay_ms`` per-hop CPU, ``vote_proc_ms``
+    majority-vote CPU, ``fallback_step_ms`` per referral step) are injectable so ``sim/calibrate.py``
+    (#29) can sweep them against N=8/N=32 emulation. The measured netem network delays
+    (``intra_ms``/``inter_ms``) are NOT levers — they stay at the frozen 5/50 ms.
+    """
+    ring = ChordRing(n, seed=seed, proc_delay_ms=proc_delay_ms)
     domains = load_domains(n_domains)
-    sim = QuerySim(ring, domains, zipf_alpha=zipf_alpha, seed=seed)
+    sim = QuerySim(ring, domains, zipf_alpha=zipf_alpha, seed=seed,
+                   vote_proc_ms=vote_proc_ms, fallback_step_ms=fallback_step_ms)
 
     wrng = random.Random(seed ^ 0xA5A5)
     total_s = warmup_s + duration_s

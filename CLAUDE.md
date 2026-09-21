@@ -55,7 +55,7 @@ these:
 | 2 | Build resolver node | **done** — epic #17 (all 8 sub-issues); see below |
 | 3 | Build testbed | **done** — N=32 emulation reliable (97.7% success, median hops 3, full finger convergence); Unbound baseline collected; N=64 deferred to Phase 5 simulator (testbed resource limit, not a protocol bug — see Phase 3) |
 | 4 | Sanity checks + baseline | **done** — hops match Chord theory (+0.5), Unbound baseline collected, N=32 stable over 3 runs, parameters frozen; see `results/PARAMETERS.md` |
-| 5 | Simulator for large scale | in progress — #25 done (Chord ring, `sim/chord_sim.py`) + #26 done (query path, `sim/query_sim.py`) + #27 done (ledger/update path, `sim/ledger_sim.py`) + #28 done (churn, `sim/churn_sim.py`); calibration (#29) next |
+| 5 | Simulator for large scale | in progress — #25 done (Chord ring, `sim/chord_sim.py`) + #26 done (query path, `sim/query_sim.py`) + #27 done (ledger/update path, `sim/ledger_sim.py`) + #28 done (churn, `sim/churn_sim.py`) + #29 done (calibration vs N=8/N=32 emulation, `sim/calibrate.py` → `results/calibration.csv`, all gated metrics ≤8%); validation/scale-up next |
 | 6 | Performance experiments | not started |
 | 7 | Attack experiments | not started |
 | 8 | PoSpace security comparison (Chia) | not started |
@@ -282,7 +282,23 @@ DRG scheme is **imported** from `phase1/pospace_drg.py` (not copied); `rpos/rpos
       N=32 result (seed 20260919, emergent — not fitted): outcomes 22% cache / 47% dht / 32%
       fallback, hop **median 3** (== emulation), p50/p95/p99 268/770/962 ms. Reproducible;
       `sim/results/query_sim_summary.csv` keeps the summary row.
-- [ ] Calibrate with per-hop processing times and message sizes measured in emulation.
+- [x] **Calibrate (#29): `sim/calibrate.py`; deliverable `results/calibration.csv`.** The emulation
+      logs only hop *counts* and *end-to-end* latency — never per-hop processing time or wire message
+      sizes — so calibration **tunes** the processing delay to match end-to-end metrics (as #29's
+      wording says), it does not plug in measured per-hop times. Levers moved (measured 5/50 ms netem
+      network **frozen**): per-hop `proc_delay_ms` 1→**18 ms** (absorbs asyncio/JSON/TCP overhead, not
+      pure CPU), `FALLBACK_STEP_MS` 50→**100 ms**, and a routing hop is now charged as a **full RTT**
+      (`chord_sim.hop_delay_ms`) — a processing-only fit stalled at 17.6%, the RTT correction (a hop is
+      a request/response RPC; both one-way legs counted) reaches ≤8%. **Result vs frozen 2026-09-21
+      emulation (all gated metrics ≤15%):** p50 N8 264.5 vs 249.1 (6.2%) / N32 472.5 vs 509.4 (7.2%);
+      p95 N8 955.2 vs 886.7 (7.7%) / N32 1356 vs 1468 (7.6%); success ~100% both. Hop median: N32 3=3
+      ✓ (means 2.93 vs 2.89). **Two flagged caveats (not hidden):** (1) **N=8 hop median 1 vs 2** —
+      hops are topology, not delay-tunable; the sim routes a *perfectly-converged* ring while emulation
+      runs +0.5 hop above theory (imperfect fingers, PARAMETERS.md §2). At N=32 that offset doesn't
+      flip the integer median; at N=8 it does. Reported but **non-gating** (a documented idealisation).
+      (2) **Success match is degenerate** — the query sim has no loss model, so ~100% by construction.
+      **Message-size modelling: out of scope for #29** (emulation never measured wire sizes; would need
+      new instrumentation) — documented limitation.
 - [ ] Validate: at N=8 and N=32 the simulator must closely match emulation (report the match),
       then check N=64 in-sim behaves as theory predicts.
 - [ ] Scale to N = 1,000 / 5,000 / 10,000.
