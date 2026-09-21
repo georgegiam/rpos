@@ -48,9 +48,16 @@ Reuse: ``ChordRing`` / ``DEFAULT_SEED`` from ``sim/chord_sim.py`` (topology, pla
 rebuilt inline exactly as ``QuerySim.__init__`` does (the same duplication ``ledger_sim`` already
 notes; extracting it is out of scope here).
 
-Run:  ``python -m sim.churn_sim``          (self-test + default sweep, writes the curve CSV)
+Run:  ``python -m sim.churn_sim``               (self-test + default N=100 sweep, writes the curve CSV)
+      ``python -m sim.churn_sim --n 100,1000``  (multi-N: one curve block per ring size in one CSV)
       ``python -m sim.churn_sim --n 100 --duration 1800 --sessions 10,30,60,300,3600``
       ``python -m sim.churn_sim --no-self-test``
+
+``--n`` takes a comma-separated list, so a single CSV can hold the scalability curve across ring
+sizes. The committed ``churn_sim_curve.csv`` spans N=100/1,000/10,000 (N=10,000 as a 3-point
+spot-check to keep runtime bounded — the ring is rebuilt every repair, O(N) per round). The curve is
+~N-invariant in the operational regime (sessions ≥ ~60 s → ≥99% at every N); at extreme churn
+(10 s sessions) larger rings are modestly *more* resilient — a finite-ring effect, reported not hidden.
 """
 from __future__ import annotations
 
@@ -113,6 +120,7 @@ class LookupRecord:
 @dataclass
 class ChurnResult:
     """Aggregate outcome of one churn run at a single mean session length."""
+    n: int                  # equilibrium ring size this run was measured at
     mean_session_s: float
     lookups: int
     success: int
@@ -288,6 +296,7 @@ def run_churn(
 
     lost_lookups = lookups - success
     result = ChurnResult(
+        n=n,
         mean_session_s=mean_session_s,
         lookups=lookups,
         success=success,
@@ -346,7 +355,7 @@ def write_curve_csv(path: Path, params: dict, curve: list[ChurnResult]) -> None:
                     "chunks_lost", "mean_live_pop"])
         for r in curve:
             w.writerow([
-                params["n"], f"{r.mean_session_s:g}", params["duration_s"], params["warmup_s"],
+                r.n, f"{r.mean_session_s:g}", params["duration_s"], params["warmup_s"],
                 f"{params['repair_s']:g}", f"{params['lookup_qps']:g}",
                 params["n_domains"], f"{params['zipf_alpha']:g}", r.seed,
                 r.lookups, r.success, r.lost_lookups, f"{r.success_rate:.6f}",
@@ -445,9 +454,15 @@ def _parse_sessions(s: str) -> list[float]:
     return [float(x) for x in s.split(",") if x.strip()]
 
 
+def _parse_ns(s: str) -> list[int]:
+    return [int(x) for x in s.split(",") if x.strip()]
+
+
 def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Phase 5 (#28) churn model — success rate vs session length.")
-    p.add_argument("--n", type=int, default=DEFAULT_N, help=f"equilibrium ring size (default {DEFAULT_N})")
+    p.add_argument("--n", type=_parse_ns, default=[DEFAULT_N], dest="ns",
+                   help=f"equilibrium ring size(s), comma-separated (default {DEFAULT_N}); "
+                        "each N produces its own set of curve rows in the one curve CSV")
     p.add_argument("--sessions", type=_parse_sessions, default=None, dest="sessions_s",
                    help="comma-separated mean session lengths in seconds (default a wide sweep)")
     p.add_argument("--duration", type=int, default=DEFAULT_DURATION_S, dest="duration_s",
@@ -480,25 +495,38 @@ def main(argv: list[str] | None = None) -> int:
         print("PASS" if ok else "FAILED")
 
     params = {
-        "n": args.n, "duration_s": args.duration_s, "warmup_s": args.warmup_s,
+        "duration_s": args.duration_s, "warmup_s": args.warmup_s,
         "repair_s": args.repair_s, "lookup_qps": args.lookup_qps,
         "n_domains": args.n_domains, "zipf_alpha": args.zipf_alpha, "seed": args.seed,
     }
-    curve, detail = run_sweep(
-        n=args.n, sessions_s=args.sessions_s, duration_s=args.duration_s, warmup_s=args.warmup_s,
-        repair_s=args.repair_s, lookup_qps=args.lookup_qps, n_domains=args.n_domains,
-        zipf_alpha=args.zipf_alpha, seed=args.seed, detail_session_s=args.detail_session_s,
-    )
-    _print_curve(params, curve)
+
+    # One sweep per requested ring size; concatenate into a single multi-N curve. Per-row `n`
+    # (written by write_curve_csv) keeps the groups distinct, so a run at several N draws the
+    # scalability curve (per-chunk loss ~ (repair/session)^3, expected ~N-invariant) in one CSV.
+    # Detail rows are kept only for the first N (default 100), matching the prior single-N output.
+    detail_n = args.ns[0]
+    curve: list[ChurnResult] = []
+    detail: list[LookupRecord] = []
+    for n in args.ns:
+        sub_curve, sub_detail = run_sweep(
+            n=n, sessions_s=args.sessions_s, duration_s=args.duration_s, warmup_s=args.warmup_s,
+            repair_s=args.repair_s, lookup_qps=args.lookup_qps, n_domains=args.n_domains,
+            zipf_alpha=args.zipf_alpha, seed=args.seed, detail_session_s=args.detail_session_s,
+        )
+        _print_curve({**params, "n": n}, sub_curve)
+        curve.extend(sub_curve)
+        if n == detail_n:
+            detail = sub_detail
 
     curve_csv = _RESULTS_DIR / "churn_sim_curve.csv"
     write_curve_csv(curve_csv, params, curve)
-    print(f"\n  wrote curve      : {curve_csv.relative_to(_HERE.parent)}")
+    print(f"\n  wrote curve      : {curve_csv.relative_to(_HERE.parent)}  "
+          f"(N={','.join(str(n) for n in args.ns)})")
     if detail:
-        detail_csv = _RESULTS_DIR / f"churn_sim_N{args.n}_s{int(args.detail_session_s)}.csv"
+        detail_csv = _RESULTS_DIR / f"churn_sim_N{detail_n}_s{int(args.detail_session_s)}.csv"
         write_detail_csv(detail_csv, detail)
         print(f"  wrote detail     : {detail_csv.relative_to(_HERE.parent)}  "
-              f"(mean session {args.detail_session_s:g}s)")
+              f"(N={detail_n}, mean session {args.detail_session_s:g}s)")
 
     return 0 if ok else 1
 

@@ -260,7 +260,12 @@ DRG scheme is **imported** from `phase1/pospace_drg.py` (not copied); `rpos/rpos
       window before re-replication); **headline = raw DHT lookup success rate** (fallback would
       recover misses — reported as a secondary count, not folded in, or the curve flattens).
       Result (N=100, repair 1 s, 1800 s, seed 20260919): success 100% for mean session ≥120 s,
-      falling to 86%/70%/43% at 30/15/10 s. **Out of scope (flagged):** stale-routing/finger-staleness
+      falling to 86%/70%/43% at 30/15/10 s. **Scaled to N=100/1,000/10,000** (`--n` now takes a comma
+      list; N=10k as a 3-point spot-check — ring rebuilt every repair, O(N)/round): curve is
+      **~N-invariant in the operational regime** (sessions ≥60 s → ≥99% at every N; ≥120 s → 100%),
+      with an honest nuance at extreme 10 s churn where larger rings are *modestly more* resilient
+      (43%/46%/58% at N=100/1k/10k — a finite-ring effect, reported not hidden). This is the
+      scalability evidence for A6. **Out of scope (flagged):** stale-routing/finger-staleness
       failures (→ Phase 6 A6) and numeric latency calibration (→ #29). Reuses `ChordRing`
       (new `ids=`/`build_fingers=False` path) + `_replica_set`/`load_domains` from the sibling sims.
 - [x] SimPy model of the same protocol, reusing protocol logic where possible. → `sim/chord_sim.py`
