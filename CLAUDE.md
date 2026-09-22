@@ -56,7 +56,7 @@ these:
 | 3 | Build testbed | **done** — N=32 emulation reliable (97.7% success, median hops 3, full finger convergence); Unbound baseline collected; N=64 deferred to Phase 5 simulator (testbed resource limit, not a protocol bug — see Phase 3) |
 | 4 | Sanity checks + baseline | **done** — hops match Chord theory (+0.5), Unbound baseline collected, N=32 stable over 3 runs, parameters frozen; see `results/PARAMETERS.md` |
 | 5 | Simulator for large scale | **done** — #25 (Chord ring, `sim/chord_sim.py`) + #26 (query path, `sim/query_sim.py`) + #27 (ledger/update, `sim/ledger_sim.py`) + #28 (churn, `sim/churn_sim.py`) + #29 (calibration vs N=8/N=32, `sim/calibrate.py` → `results/calibration.csv`, gated metrics ≤8%) + #30 (scale N=1k/5k/10k, `sim/scale_sim.py` → `results/sim_scale.csv`, routing hops match ½·log₂N within +1); simulator matches emulation and runs at 10k |
-| 6 | Performance experiments | **in progress** — A1 (latency vs N) done: #32; A2 (throughput/saturation, N=32) done: #33, `experiments/run_a2.sh` + `experiments/a2_throughput.py` → `results/A2_throughput.csv` + `fig_A2_throughput.png` + `A2_NOTES.md` (saturation = 100 qps); A3–A7 not started |
+| 6 | Performance experiments | **in progress** — A1 (latency vs N) done: #32; A2 (throughput/saturation, N=32) done: #33, `experiments/run_a2.sh` + `experiments/a2_throughput.py` → `results/A2_throughput.csv` + `fig_A2_throughput.png` + `A2_NOTES.md` (saturation = 100 qps); A3 (scalability, throughput+per-node load vs N) done: #34, `experiments/run_a3.sh` + `experiments/a3_scalability.py` → `results/A3_scalability.csv` + `fig_A3_scalability.png` + `A3_NOTES.md` (per-node load falls emu 75→18 / sim 43→0.12 msgs/node/s across N=4→10k, same slope; throughput flat ~50 qps); A4–A7 not started |
 | 7 | Attack experiments | not started |
 | 8 | PoSpace security comparison (Chia) | not started |
 | 9 | Writing | not started |
@@ -339,7 +339,19 @@ Run each 3–5×; report averages with error bars and percentiles.
       400-qps stop. Flagged: p95-of-successful *falls* under overload (cache hits survive, slow
       DHT/fallback queries time out and drop from the success set) — success rate is the headline,
       not latency-of-successful. Single-N=32 (emulation ceiling); multi-N scaling is A3.
-- [ ] **A3 Scalability:** throughput and per-node load as N grows (emulation + simulation).
+- [x] **A3 Scalability:** throughput and per-node load as N grows (emulation + simulation). →
+      #34; `experiments/run_a3.sh` (collect: N=4/8/16/32 ×3 @ fixed 50 qps, A2-style warm@10→
+      measure@50, snapshot ring logs **while up** so per-node counts are complete) +
+      `experiments/a3_scalability.py` (combine + plot; re-runs the calibrated sim at **50 qps** for
+      N=4…10,000, leaving the Phase-5 `sim_scale.csv` at qps=100 untouched) → `results/A3_scalability.csv`
+      + `fig_A3_scalability.png` + `A3_NOTES.md`. **Per-node load = the sim's `ring_round_trips`
+      message model applied to the *measured* emulation `(outcome, hops)` logs — identical model both
+      sides, so the points are comparable** (no node instrumentation; `chord.py`/`socket_net.py`
+      untouched). Result: per-node load falls ~0.62×/doubling-of-N on both sides (emu
+      75.4→48.4→28.7→17.7; sim 43→29.4→19.5→12.5 msgs/node/s over N=4→32; sim reaches **0.12** at
+      N=10k), throughput flat at offered ~50 qps (emu goodput 47.4–50.0). Flagged: emulation sits
+      ~1.5–1.8× above the sim overlay (cold-start/cache-warmth offset, same slope — the scaling
+      claim is the slope); N=32 success 94.8% (the emulation ceiling, consistent with A2).
 - [ ] **A4 Replication cost:** s = 3, 5, 7.
 - [ ] **A5 Updates:** commit latency, messages per update, ledger growth.
 - [ ] **A6 Churn:** lookup success and availability vs session length.

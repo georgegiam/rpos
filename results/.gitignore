@@ -21,3 +21,9 @@ a1/
 # Phase 6 A2 raw per-level snapshots (experiments/run_a2.sh) — regenerable from the fixed seed
 # (CLAUDE.md §2), so not committed; A2_throughput.csv is the committed summary.
 a2/
+# Phase 6 A3 deliverable: scalability table (experiments/a3_scalability.py). The figure
+# (fig_A3_scalability.png) and A3_NOTES.md are not *.csv, so already tracked.
+!A3_scalability.csv
+# Phase 6 A3 raw per-run snapshots (experiments/run_a3.sh) — regenerable from the fixed seed
+# (CLAUDE.md §2), so not committed; A3_scalability.csv is the committed summary.
+a3/
