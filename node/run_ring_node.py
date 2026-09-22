@@ -52,13 +52,14 @@ Run: ``python -m node.run_ring_node``.
 import asyncio
 import json
 import os
+import time
 
 from node.ids import RING_BITS, RING_SIZE, node_id_from_pk
 from node.malicious import MODES, MaliciousNode
 from node.pospace_admission import AdmissionError, PoSpaceNode
 from node.query import IterativeResolver
 from node.run_node import _pk_for
-from node.socket_net import SocketNetwork
+from node.socket_net import SocketNetwork, rpc_counter
 
 
 def _cfg():
@@ -214,6 +215,32 @@ async def _main() -> None:
         return {"node_id": node.node_id, "pred": node.predecessor,
                 "succ_list": list(node.successor_list), "fingers": list(node.fingers)}
     node.register("debug_state", _h_debug_state)
+
+    # A5 (issue #36) admin RPCs — inert unless an external driver calls them, so a normal run is
+    # byte-identical. They let experiments/a5_driver.py drive real ledger updates over the live
+    # ring and read ring-wide ledger growth WITHOUT any DNS-update opcode or write to the frozen
+    # protocol code (node/ledger.py::propose_update is called unchanged; the timing + wire-RPC
+    # count are gathered here, in Phase-3 entrypoint code).
+    async def _h_admin_propose(src, domain: str, value: str, action: str = "update"):
+        """Run one Algorithm-3 update and report its measured cost. ``rpc_counter`` isolates the
+        wire RPCs this coroutine issues (find_successor hops / get_succ_list / ledger 2PC) from
+        the concurrent maintenance loop (a different task). A round-trip = req+resp = 2 messages,
+        matching sim/ledger_sim's ``messages = 2 * round_trips``."""
+        t0 = time.perf_counter()
+        with rpc_counter() as counts:
+            ok = await node.propose_update(domain, value, action=action)
+        latency_ms = (time.perf_counter() - t0) * 1000.0
+        round_trips = sum(counts.values())
+        return {"ok": bool(ok), "latency_ms": latency_ms, "round_trips": round_trips,
+                "messages": 2 * round_trips, "breakdown": dict(counts),
+                "ledger_len_local": len(node.ledger)}
+
+    async def _h_admin_ledger_len(src):
+        """This node's committed ledger length (ring-wide growth = sum over all nodes)."""
+        return len(node.ledger)
+
+    node.register("admin_propose", _h_admin_propose)
+    node.register("admin_ledger_len", _h_admin_ledger_len)
 
     # 1) serve RPCs BEFORE joining, so our successor can challenge us during admission.
     await net.start_server("0.0.0.0", c["ring_port"])

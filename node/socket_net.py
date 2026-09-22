@@ -45,6 +45,7 @@ node/malicious.py) remain modelled ABOVE the transport, in the node's own handle
 """
 import asyncio
 import base64
+import contextvars
 import json
 import socket
 import time
@@ -54,6 +55,42 @@ from typing import Any, Optional
 # ledger logs) are far below this; the cap exists only to stop a hostile/buggy peer announcing
 # a huge length and exhausting memory. Oversized frames are rejected, never buffered.
 MAX_FRAME_BYTES = 8 * 1024 * 1024
+
+# Per-task wire-RPC counter (Phase 6 A5 instrumentation, OFF by default). When a coroutine sets
+# this contextvar to a fresh dict via ``rpc_counter()``, every OUTBOUND ``SocketNetwork.rpc``
+# issued in that task (and its awaited descendants) increments ``counter[method]``. Because an
+# asyncio task carries its own contextvars copy, a counter set inside e.g. an ``admin_propose``
+# handler captures exactly that update's find_successor/get_succ_list/ledger_precommit/
+# ledger_commit RPCs and is fully isolated from the concurrent maintenance loop (a different
+# task, which never sees the counter). Left unset, this is a no-op, so every existing experiment
+# path (A1–A4) is byte-identical. Self-directed calls short-circuit in ``NodeServer.call`` before
+# reaching ``rpc`` (no wire message), so the count is of WIRE round-trips.
+_RPC_COUNTER: "contextvars.ContextVar[Optional[dict]]" = contextvars.ContextVar(
+    "socket_net_rpc_counter", default=None)
+
+
+class rpc_counter:
+    """Context manager that counts wire RPCs issued in the current task.
+
+    Usage::
+
+        with rpc_counter() as counts:
+            await node.propose_update(...)
+        # counts == {"find_successor": h, "get_succ_list": 1, "ledger_precommit": s, ...}
+    """
+
+    def __init__(self):
+        self.counts: dict[str, int] = {}
+        self._token = None
+
+    def __enter__(self) -> dict:
+        self._token = _RPC_COUNTER.set(self.counts)
+        return self.counts
+
+    def __exit__(self, *exc):
+        if self._token is not None:
+            _RPC_COUNTER.reset(self._token)
+        return False
 
 
 class RemoteError(Exception):
@@ -259,6 +296,9 @@ class SocketNetwork:
         raises on a down node, a timeout, or a remote handler error."""
         if dst == self.self_id:                    # defensive; node.call already shortcuts self
             return await self._local.handlers[method](src, *args)
+        counter = _RPC_COUNTER.get()               # A5 instrumentation (no-op unless a counter is set)
+        if counter is not None:                    # counts WIRE RPCs only (self-calls returned above)
+            counter[method] = counter.get(method, 0) + 1
         addr = self.roster.get(dst)
         if addr is None:
             raise ConnectionError(f"no address for node {dst:#x}")

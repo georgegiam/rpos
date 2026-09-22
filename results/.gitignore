@@ -33,3 +33,9 @@ a3/
 # Phase 6 A4 raw per-run snapshots (experiments/run_a4.sh) — regenerable from the fixed seed
 # (CLAUDE.md §2), so not committed; A4_replication.csv is the committed summary.
 a4/
+# Phase 6 A5 deliverable: update-cost table (experiments/a5_updates.py). The figure
+# (fig_A5_updates.png) and A5_NOTES.md are not *.csv, so already tracked.
+!A5_updates.csv
+# Phase 6 A5 raw per-run snapshots (experiments/run_a5.sh) — regenerable from the fixed seed
+# (CLAUDE.md §2), so not committed; A5_updates.csv is the committed summary.
+a5/
