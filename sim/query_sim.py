@@ -133,15 +133,20 @@ def _route_latency_ms(ring: ChordRing, rr: RouteResult) -> float:
     return lat
 
 
-def _replica_set(ring: ChordRing, primary: int) -> list[int]:
-    """[primary] + primary's successor list, truncated to S (mirrors storage.replica_set)."""
+def _replica_set(ring: ChordRing, primary: int, s: int = S) -> list[int]:
+    """[primary] + primary's successor list, truncated to ``s`` (mirrors storage.replica_set).
+
+    ``s`` defaults to the module ``S`` (=3) so existing callers are unchanged; A4 (issue #35)
+    passes the swept replication factor. Getting s>4 replicas needs the ring's successor list to
+    name >= s-1 successors — build the ring with ``succ_list_len>=s-1`` (see run_workload).
+    """
     nodes = [primary]
-    for s in ring.succ_list[primary]:
-        if s not in nodes:
-            nodes.append(s)
-        if len(nodes) >= S:
+    for nid in ring.succ_list[primary]:
+        if nid not in nodes:
+            nodes.append(nid)
+        if len(nodes) >= s:
             break
-    return nodes[:S]
+    return nodes[:s]
 
 
 # ---------------------------------------------------------------------------------------
@@ -160,12 +165,14 @@ class QuerySim:
         fallback_steps: int = FALLBACK_STEPS,
         fallback_step_ms: float = FALLBACK_STEP_MS,
         vote_proc_ms: float = VOTE_PROC_MS,
+        s: int = S,
     ) -> None:
         self.ring = ring
         self.domains = domains
         self.fallback_steps = fallback_steps
         self.fallback_step_ms = fallback_step_ms
         self.vote_proc_ms = vote_proc_ms
+        self.s = s                                 # replication factor (A4 sweep, issue #35)
 
         # Cold start: empty DHT, empty per-node caches.
         self.dht_stored: set[int] = set()
@@ -210,7 +217,7 @@ class QuerySim:
         # Tier 2: DHT read attempt — route to primary, learn replicas, read them (majority vote).
         rr = ring.route(origin, cid)
         primary = rr.responsible
-        replicas = _replica_set(ring, primary)
+        replicas = _replica_set(ring, primary, self.s)
         route_lat = _route_latency_ms(ring, rr)
         succ_rtt = _rpc_rtt_ms(ring, origin, primary)                 # get_succ_list RPC
         read_rtt = max((_rpc_rtt_ms(ring, origin, r) for r in replicas), default=0.0)  # parallel
@@ -273,6 +280,8 @@ def run_workload(
     proc_delay_ms: float = DEFAULT_PROC_DELAY_MS,
     vote_proc_ms: float = VOTE_PROC_MS,
     fallback_step_ms: float = FALLBACK_STEP_MS,
+    s: int = S,
+    succ_list_len: int | None = None,
 ) -> tuple[QuerySim, list[QueryRecord]]:
     """Run the query workload; return (sim, measurement-window records).
 
@@ -281,10 +290,14 @@ def run_workload(
     (#29) can sweep them against N=8/N=32 emulation. The measured netem network delays
     (``intra_ms``/``inter_ms``) are NOT levers — they stay at the frozen 5/50 ms.
     """
-    ring = ChordRing(n, seed=seed, proc_delay_ms=proc_delay_ms)
+    # A4 (issue #35): a replica set of s>4 needs the ring's successor list to name >= s-1
+    # successors. Default (succ_list_len=None -> module SUCC_LIST_LEN=3, s=3) is unchanged.
+    if succ_list_len is None and s > 3:
+        succ_list_len = s - 1
+    ring = ChordRing(n, seed=seed, proc_delay_ms=proc_delay_ms, succ_list_len=succ_list_len)
     domains = load_domains(n_domains)
     sim = QuerySim(ring, domains, zipf_alpha=zipf_alpha, seed=seed,
-                   vote_proc_ms=vote_proc_ms, fallback_step_ms=fallback_step_ms)
+                   vote_proc_ms=vote_proc_ms, fallback_step_ms=fallback_step_ms, s=s)
 
     wrng = random.Random(seed ^ 0xA5A5)
     total_s = warmup_s + duration_s

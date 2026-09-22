@@ -34,6 +34,13 @@ Machine: Apple M4, 10 cores, 16 GiB RAM (CLAUDE.md §5). All runs use Docker Des
 | Emulation scale ceiling | **N = 32** (N=64 → Phase 5 simulator) | Phase 3 decision |
 
 Notes:
+- **A4 (issue #35) sweeps `s`** over {3, 5, 7}. It is set via the additive `REPLICATION` env var
+  (wired `gen_nodes_compose.py` → `run_ring_node.py` → the existing `StorageMixin(replication=…)`
+  kwarg), and — because a replica set of s>4 needs a longer Chord successor list — a companion
+  `SUCC_LIST_LEN` env (= max(3, s−1)). `SUCC_LIST_LEN` is applied as a **runtime override** of
+  `node.chord.SUCC_LIST_LEN` in `run_ring_node`; **`node/chord.py` source is NOT modified** and
+  stays byte-identical. Both default to **3**, so every non-A4 experiment is unchanged and the A4
+  s=3 point reproduces the frozen s=3 conditions.
 - δ = 2.0 s is the **test-scale** admission timeout for the small (`PLOT_N=1024`) plots used in
   emulation, not the thesis-scale δ discussed in Phase 1 (which depends on final DRG in-degree
   sign-off). The two are distinct; do not conflate them.

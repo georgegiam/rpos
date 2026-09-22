@@ -41,6 +41,8 @@
 #   --port P           resolver UDP port for host mode [5300]
 #   --output-dir DIR   where CSVs land [<repo>/results]
 #   --health-timeout S seconds to wait for the stack to become healthy [180]
+#   --replication S    nodes-mode chunk replication factor s [3]  (A4 sweep, issue #35)
+#   --succ-list-len L  nodes-mode Chord successor-list length [3] (raise for s>4)
 #   --keep-up          do NOT tear the stack down at the end
 #   -h, --help         show this help
 #
@@ -63,6 +65,10 @@ RESOLVER=""; PORT=5300; OUTDIR="$REPO_ROOT/results"; HEALTH_TIMEOUT=180; KEEP_UP
 # epic #24: EXPMODE=host -> Unbound baseline (the original path); EXPMODE=nodes -> the real
 # resolver ring (node/run_ring_node over sockets). nodes-mode uses the extra params below.
 EXPMODE=host; RING_PORT=7000; DNS_PORT=5300; PLOT_N=1024; DRG_INDEGREE=2
+# A4 (issue #35) sweeps the replication factor; both default to 3 (frozen PARAMETERS.md) so every
+# other experiment/caller is byte-identical. SUCC_LIST_LEN lengthens the successor list a replica
+# set of s>4 needs (applied as a runtime override in run_ring_node; chord.py stays byte-identical).
+REPLICATION=3; SUCC_LIST_LEN=3
 
 # Print the leading comment banner (lines 2.. up to `set -euo`) as help text.
 usage() { awk 'NR>1 && /^set -euo/{exit} NR>1{sub(/^# ?/,"");print}' "$0"; }
@@ -137,7 +143,8 @@ run_nodes_mode() {
         python3 dns/generate_zones.py --count 1000; }
     note "generating docker-compose.nodes.yml for N=$N ring nodes"
     python3 gen_nodes_compose.py --nodes "$N" --plot-n "$PLOT_N" --drg-indegree "$DRG_INDEGREE" \
-        --seed "$SEED" --ring-port "$RING_PORT" --dns-port "$DNS_PORT"
+        --seed "$SEED" --ring-port "$RING_PORT" --dns-port "$DNS_PORT" \
+        --replication "$REPLICATION" --succ-list-len "$SUCC_LIST_LEN"
     local j
     for j in $(seq 0 $((N - 1))); do
         mkdir -p "$REPO_ROOT/results/ring/$j"
@@ -248,6 +255,8 @@ while [ $# -gt 0 ]; do
         --port)           PORT="$2"; shift 2 ;;
         --output-dir)     OUTDIR="$2"; shift 2 ;;
         --health-timeout) HEALTH_TIMEOUT="$2"; shift 2 ;;
+        --replication)    REPLICATION="$2"; shift 2 ;;
+        --succ-list-len)  SUCC_LIST_LEN="$2"; shift 2 ;;
         --keep-up)        KEEP_UP=1; shift ;;
         -h|--help)        usage; exit 0 ;;
         *) echo "unknown argument: $1" >&2; echo "try: $0 --help" >&2; exit 2 ;;

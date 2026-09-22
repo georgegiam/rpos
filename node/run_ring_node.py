@@ -37,6 +37,15 @@ Config (environment):
     MALICIOUS_MODE    honest|lie|drop|misroute|forge            [honest]
     MAINT_INTERVAL    maintenance-loop period seconds           [1.0]
     JOIN_TIMEOUT      seconds to keep retrying the join         [120]
+    REPLICATION       chunk replication factor s                [3]
+    SUCC_LIST_LEN     Chord successor-list length               [3]
+
+    REPLICATION / SUCC_LIST_LEN default to 3 (the frozen PARAMETERS.md value), so every existing
+    experiment behaves identically. They are raised together only by experiment A4 (issue #35),
+    which sweeps the replication factor: the replica set is ``[primary] + up to SUCC_LIST_LEN``
+    successors truncated to REPLICATION, so s>4 needs a longer successor list. SUCC_LIST_LEN is
+    applied as a *runtime override* of ``node.chord.SUCC_LIST_LEN`` (read there as a module global
+    every maintenance round) — ``node/chord.py`` source is NOT modified and stays byte-identical.
 
 Run: ``python -m node.run_ring_node``.
 """
@@ -72,6 +81,8 @@ def _cfg():
         maint_interval=float(os.environ.get("MAINT_INTERVAL", "1.0")),
         join_timeout=float(os.environ.get("JOIN_TIMEOUT", "120")),
         join_stagger=float(os.environ.get("JOIN_STAGGER", "0.4")),
+        replication=int(os.environ.get("REPLICATION", "3")),
+        succ_list_len=int(os.environ.get("SUCC_LIST_LEN", "3")),
     )
 
 
@@ -185,8 +196,16 @@ async def _main() -> None:
     net = SocketNetwork(self_id, roster)
     upstream = _load_upstream(c["zone_json"])
 
+    # Runtime override of the Chord successor-list length (default 3 => no change). chord.py reads
+    # SUCC_LIST_LEN as a module global on every _refresh_successor_list round, so setting it here —
+    # before the node runs any maintenance — lengthens the successor list WITHOUT editing the frozen
+    # chord.py source. A4 (issue #35) needs this so a replica set of s>4 can be filled. See _cfg().
+    import node.chord as _chord
+    _chord.SUCC_LIST_LEN = c["succ_list_len"]
+
     kw = dict(plot_n=c["plot_n"], drg_indegree=c["drg_indegree"],
-              challenge_timeout=c["challenge_timeout"], seed=c["seed"], upstream=upstream)
+              challenge_timeout=c["challenge_timeout"], seed=c["seed"], upstream=upstream,
+              replication=c["replication"])
     node = (PoSpaceNode(pk, net, **kw) if c["mode"] == "honest"
             else MaliciousNode(pk, net, malicious_mode=c["mode"], **kw))
 

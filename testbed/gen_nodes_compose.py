@@ -57,6 +57,8 @@ def _service(j: int, n: int, a) -> str:
       SEED: "{a.seed}"
       MALICIOUS_MODE: "{a.mode}"
       MAINT_INTERVAL: "1.0"
+      REPLICATION: "{a.replication}"
+      SUCC_LIST_LEN: "{a.succ_list_len}"
       RING_IP_PREFIX: "172.30.0"
       RING_IP_BASE: "{IP_BASE}"
     volumes:
@@ -107,6 +109,11 @@ def main() -> int:
     ap.add_argument("--ring-port", type=int, default=7000)
     ap.add_argument("--dns-port", type=int, default=5300)
     ap.add_argument("--mode", default="honest")
+    # A4 (issue #35) sweeps the replication factor. Defaults = 3 (frozen PARAMETERS.md), so every
+    # other experiment is unaffected. A replica set of s>4 also needs a longer successor list
+    # (SUCC_LIST_LEN), applied as a runtime override in run_ring_node (chord.py stays byte-identical).
+    ap.add_argument("--replication", type=int, default=3, help="chunk replication factor s")
+    ap.add_argument("--succ-list-len", type=int, default=3, help="Chord successor-list length")
     a = ap.parse_args()
     if a.nodes < 1:
         ap.error("--nodes must be >= 1")

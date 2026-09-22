@@ -50,16 +50,20 @@ DURATION_S = 60
 WARMUP_S = 30          # frozen PARAMETERS.md warm-up window
 
 
-def ring_round_trips(outcome: str, hops: int) -> int:
-    """Ring RPC round trips for one query, mirroring query_sim.resolve's RPC structure."""
+def ring_round_trips(outcome: str, hops: int, s: int = S) -> int:
+    """Ring RPC round trips for one query, mirroring query_sim.resolve's RPC structure.
+
+    ``s`` is the replication factor; it defaults to the module ``S`` (=3) so existing callers
+    (A3) are unchanged. A4 (issue #35) passes the swept s so message counts scale with it.
+    """
     if outcome == "cache_hit":
         return 0
     if outcome == "dht_hit":
         route_hops = hops
-        return route_hops + 1 + S                       # route + get_succ_list + S replica reads
+        return route_hops + 1 + s                       # route + get_succ_list + s replica reads
     route_hops = hops - FALLBACK_STEPS                  # fallback: recover the routing component
-    read_attempt = route_hops + 1 + S                   # failed DHT read
-    store_back = route_hops + 1 + S                     # re-route + S replica writes
+    read_attempt = route_hops + 1 + s                   # failed DHT read
+    store_back = route_hops + 1 + s                     # re-route + s replica writes
     return read_attempt + store_back
 
 

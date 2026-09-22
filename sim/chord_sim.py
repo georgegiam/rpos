@@ -92,6 +92,7 @@ class ChordRing:
         inter_ms: float = DEFAULT_INTER_MS,
         ids: list[int] | None = None,
         build_fingers: bool = True,
+        succ_list_len: int | None = None,
     ) -> None:
         # ``ids`` (optional): use this explicit node-id set instead of generating one from
         #   (n, seed). ``sim/churn_sim.py`` (#28) uses it to rebuild a converged ring over the
@@ -118,6 +119,10 @@ class ChordRing:
         self.proc_delay_ms = proc_delay_ms
         self.intra_ms = intra_ms
         self.inter_ms = inter_ms
+        # Successor-list length. Defaults to the module SUCC_LIST_LEN (=3) so every existing caller
+        # is unchanged; A4 (issue #35) passes a longer list so a replica set of s>4 can be filled,
+        # mirroring the run_ring_node SUCC_LIST_LEN runtime override on the emulation side.
+        self.succ_list_len = SUCC_LIST_LEN if succ_list_len is None else succ_list_len
 
         self.pos = {nid: i for i, nid in enumerate(self.ids)}
         # Region assigned by sorted index, deterministic (PARAMETERS.md §1).
@@ -148,7 +153,7 @@ class ChordRing:
         i = self.pos[nid]
         out: list[int] = []
         k = 1
-        while len(out) < SUCC_LIST_LEN and k <= self.n:
+        while len(out) < self.succ_list_len and k <= self.n:
             cand = self.ids[(i + k) % self.n]
             if cand != nid and cand not in out:
                 out.append(cand)
