@@ -39,3 +39,9 @@ a4/
 # Phase 6 A5 raw per-run snapshots (experiments/run_a5.sh) — regenerable from the fixed seed
 # (CLAUDE.md §2), so not committed; A5_updates.csv is the committed summary.
 a5/
+# Phase 6 A6 deliverable: churn success-vs-session table (experiments/a6_churn.py). The figure
+# (fig_A6_churn.png) and A6_NOTES.md are not *.csv, so already tracked.
+!A6_churn.csv
+# Phase 6 A6 raw per-run snapshots (experiments/run_a6.sh) — regenerable from the fixed seed
+# (CLAUDE.md §2), so not committed; A6_churn.csv is the committed summary.
+a6/

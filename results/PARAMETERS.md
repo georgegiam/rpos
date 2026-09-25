@@ -47,6 +47,13 @@ Notes:
 - Warm-up of 30 s is what made N=32 converge and populate the DHT before the measured window
   (Phase 3). It is used for the nodes-mode runs; the Unbound baseline uses 15 s (a warm cache
   needs less).
+- **A6 (issue #37) sweeps the mean node session length** over {30, 60, 120, 300, ∞} s (∞ = no
+  churn). Churn is injected by `experiments/a6_churn_injector.py`, which `docker kill`/`docker start`s
+  the ring containers on a seeded per-node alternating-renewal schedule (UP ~ Exp(mean_session),
+  DOWN ~ Exp(5 s)); **node 0 is never churned** (seed/bootstrap). It manipulates only containers the
+  compose file already created — no protocol code or frozen artifact is touched. A6's measured load
+  enters the ring **at node 0 only** (`query_gen --ring-nodes 1`) to isolate data/route availability
+  from "asked a dead node"; every other parameter is the frozen default (N=32, s=3, 10 qps, 120 s).
 
 ---
 

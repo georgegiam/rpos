@@ -1,0 +1,11 @@
+source,n,mean_session_s,qps,duration_s,runs,raw_dht_success_pct,raw_dht_success_sd,e2e_success_pct,e2e_success_sd,p50_ms,p95_ms,p99_ms,p95_sd,fallback_pct,mean_live_pop,note
+emulation,32,30.0000,10.0000,120,3,70.7345,0.2989,97.4167,0.6509,1.6403,1693.2280,4117.5075,411.3892,29.2655,27.7964,raw-DHT headline; no active re-replication (fallback-on-read only)
+emulation,32,60.0000,10.0000,120,3,72.7272,1.0504,96.4444,2.0705,1.7557,1077.4741,3585.4075,275.3068,27.2728,29.4478,raw-DHT headline; no active re-replication (fallback-on-read only)
+emulation,32,120.0000,10.0000,120,3,72.8924,0.3721,98.3333,0.2205,1.8363,792.3234,1795.5538,20.6354,27.1076,30.2368,raw-DHT headline; no active re-replication (fallback-on-read only)
+emulation,32,300.0000,10.0000,120,3,74.8118,0.3169,99.4444,0.1273,2.2520,821.3620,1284.1858,8.1138,25.1882,31.3125,raw-DHT headline; no active re-replication (fallback-on-read only)
+emulation,32,inf,10.0000,120,3,76.3017,0.1239,99.7500,0.2205,2.8823,928.5367,1322.1608,1.8124,23.6983,32.0000,raw-DHT headline; no active re-replication (fallback-on-read only)
+sim,32,30.0000,10.0000,1800,1,96.8556,0.0000,,0.0000,,,,0.0000,3.1444,31.8407,"data-availability model, 1s repair, 96 chunks lost, no latency"
+sim,32,60.0000,10.0000,1800,1,100.0000,0.0000,,0.0000,,,,0.0000,0.0000,32.1321,"data-availability model, 1s repair, 0 chunks lost, no latency"
+sim,32,120.0000,10.0000,1800,1,100.0000,0.0000,,0.0000,,,,0.0000,0.0000,31.3108,"data-availability model, 1s repair, 0 chunks lost, no latency"
+sim,32,300.0000,10.0000,1800,1,100.0000,0.0000,,0.0000,,,,0.0000,0.0000,33.6723,"data-availability model, 1s repair, 0 chunks lost, no latency"
+sim,32,inf,10.0000,1800,1,100.0000,0.0000,,0.0000,,,,0.0000,0.0000,32.0000,"data-availability model, 1s repair, 0 chunks lost, no latency"
