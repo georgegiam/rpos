@@ -1,0 +1,25 @@
+source,delta,log2_size,size,ring_n,repeats,t_plot_ms,t_plot_sd,t_commit_ms,t_commit_sd,t_prove_ms,t_verify_ms,t_admission_ms,t_admission_sd,labels_per_s,plot_bytes,proof_bytes,plot_native_floor_ms,note
+component,2,10,1024,8,5,1.5900,0.0869,0.2876,0.0121,0.0044,0.0108,1.8928,0.0940,644014.6262,32768,1056.0000,0.0503,"plot+commit+prove+verify, measured over 8 ring keys; +~2 RPC RTT over sockets"
+component,2,12,4096,8,5,6.5422,0.4294,1.1439,0.0336,0.0051,0.0128,7.7041,0.4395,626086.7864,131072,1248.0000,0.2011,"plot+commit+prove+verify, measured over 8 ring keys; +~2 RPC RTT over sockets"
+component,2,14,16384,8,5,26.0144,0.8246,4.5138,0.0878,0.0058,0.0143,30.5483,0.8316,629805.1551,524288,1440.0000,0.8046,"plot+commit+prove+verify, measured over 8 ring keys; +~2 RPC RTT over sockets"
+component,2,16,65536,8,5,106.2004,1.6633,18.3192,0.2967,0.0068,0.0163,124.5427,1.8184,617097.3182,2097152,1632.0000,3.2184,"plot+commit+prove+verify, measured over 8 ring keys; +~2 RPC RTT over sockets"
+component,4,10,1024,8,5,3.2160,0.0632,0.2966,0.0125,0.0083,0.0186,3.5395,0.0681,318407.0221,32768,1760.0000,0.0752,"plot+commit+prove+verify, measured over 8 ring keys; +~2 RPC RTT over sockets"
+component,4,12,4096,8,5,13.0208,0.2993,1.1674,0.0390,0.0093,0.0213,14.2189,0.3098,314573.4302,131072,2080.0000,0.3013,"plot+commit+prove+verify, measured over 8 ring keys; +~2 RPC RTT over sockets"
+component,4,14,16384,8,5,52.8157,0.8987,4.6641,0.1167,0.0105,0.0247,57.5151,0.9428,310210.5442,524288,2400.0000,1.2064,"plot+commit+prove+verify, measured over 8 ring keys; +~2 RPC RTT over sockets"
+component,4,16,65536,8,5,214.8430,3.0430,18.3757,0.3725,0.0122,0.0279,233.2587,3.0611,305041.3351,2097152,2720.0000,4.8267,"plot+commit+prove+verify, measured over 8 ring keys; +~2 RPC RTT over sockets"
+component,8,10,1024,8,5,6.4578,0.1088,0.2952,0.0109,0.0153,0.0323,6.8007,0.1145,158567.0390,32768,3168.0000,0.1219,"plot+commit+prove+verify, measured over 8 ring keys; +~2 RPC RTT over sockets"
+component,8,12,4096,8,5,26.4780,0.5554,1.1581,0.0251,0.0174,0.0381,27.6916,0.5580,154694.5786,131072,3744.0000,0.4953,"plot+commit+prove+verify, measured over 8 ring keys; +~2 RPC RTT over sockets"
+component,8,14,16384,8,5,106.8653,1.5366,4.6777,0.1197,0.0196,0.0444,111.6070,1.5704,153314.4995,524288,4320.0000,1.9957,"plot+commit+prove+verify, measured over 8 ring keys; +~2 RPC RTT over sockets"
+component,8,16,65536,8,5,438.7172,6.6773,18.7000,0.3642,0.0223,0.0504,457.4899,6.8197,149380.9634,2097152,4896.0000,8.0083,"plot+commit+prove+verify, measured over 8 ring keys; +~2 RPC RTT over sockets"
+ring_inproc,2,10,1024,8,3,,,,,,,2.2552,0.0691,,32768,,,real join() incl challenge over in-process bus (~0 net); founder create=2.3 ms
+ring_inproc,2,12,4096,8,3,,,,,,,8.1373,0.4498,,131072,,,real join() incl challenge over in-process bus (~0 net); founder create=7.7 ms
+ring_inproc,2,14,16384,8,3,,,,,,,32.1075,0.8222,,524288,,,real join() incl challenge over in-process bus (~0 net); founder create=31.9 ms
+ring_inproc,2,16,65536,8,3,,,,,,,129.5539,2.0817,,2097152,,,real join() incl challenge over in-process bus (~0 net); founder create=129.2 ms
+ring_inproc,4,10,1024,8,3,,,,,,,3.8835,0.0781,,32768,,,real join() incl challenge over in-process bus (~0 net); founder create=3.6 ms
+ring_inproc,4,12,4096,8,3,,,,,,,14.9160,0.6028,,131072,,,real join() incl challenge over in-process bus (~0 net); founder create=14.4 ms
+ring_inproc,4,14,16384,8,3,,,,,,,59.6752,2.0648,,524288,,,real join() incl challenge over in-process bus (~0 net); founder create=57.8 ms
+ring_inproc,4,16,65536,8,3,,,,,,,238.1784,2.6163,,2097152,,,real join() incl challenge over in-process bus (~0 net); founder create=237.3 ms
+ring_inproc,8,10,1024,8,3,,,,,,,7.2531,0.0848,,32768,,,real join() incl challenge over in-process bus (~0 net); founder create=6.9 ms
+ring_inproc,8,12,4096,8,3,,,,,,,28.9721,1.2707,,131072,,,real join() incl challenge over in-process bus (~0 net); founder create=27.8 ms
+ring_inproc,8,14,16384,8,3,,,,,,,113.9917,1.7133,,524288,,,real join() incl challenge over in-process bus (~0 net); founder create=112.9 ms
+ring_inproc,8,16,65536,8,3,,,,,,,457.9722,3.0864,,2097152,,,real join() incl challenge over in-process bus (~0 net); founder create=460.2 ms

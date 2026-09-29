@@ -54,6 +54,14 @@ Notes:
   compose file already created — no protocol code or frozen artifact is touched. A6's measured load
   enters the ring **at node 0 only** (`query_gen --ring-nodes 1`) to isolate data/route availability
   from "asked a dead node"; every other parameter is the frozen default (N=32, s=3, 10 qps, 120 s).
+- **A7 (issue #38) sweeps the PoSpace plot size `PLOT_N`** over {2^10, 2^12, 2^14, 2^16} leaves at
+  N=8, δ=2 headline (+ a δ∈{2,4,8} in-degree axis). It is the one Phase-6 experiment that is a
+  **microbenchmark, not a Docker testbed run**: at these sizes a plot is only ~1.6–106 ms, which a
+  container ring's startup/convergence noise would swamp. `experiments/a7_admission.py` times the
+  node's exact admission functions (`plot_v3`/`commit_v3`/`prove_v3`/`verify_v3`) over the 8 real ring
+  keys and cross-checks a real in-process `create()`/`join()` ring. No frozen artifact is touched
+  (imports only); every other parameter is the frozen default (seed 20260919, δ challenge timeout
+  2.0 s).
 
 ---
 
