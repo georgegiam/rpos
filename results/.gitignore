@@ -45,3 +45,7 @@ a5/
 # Phase 6 A6 raw per-run snapshots (experiments/run_a6.sh) — regenerable from the fixed seed
 # (CLAUDE.md §2), so not committed; A6_churn.csv is the committed summary.
 a6/
+# Phase 6 A7 deliverable: admission join-time-vs-plot-size table (experiments/a7_admission.py). The
+# figure (fig_A7_admission.png) and A7_NOTES.md are not *.csv, so already tracked. A7 is a
+# microbenchmark (no Docker) and writes the summary directly — there is no per-run raw snapshot dir.
+!A7_admission.csv
