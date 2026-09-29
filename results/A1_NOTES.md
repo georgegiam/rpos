@@ -5,7 +5,7 @@ Reproducible trail for the A1 experiment. Numbers live in
 this file records *how* they were produced and the honest caveats (CLAUDE.md §2
 "measure, don't assert" / "flag, don't hide").
 
-## Results (measured 2026-09-21, seed 20260919, 3 runs per N)
+## Results (measured 2026-09-21, seed 20260919, 3 runs per N; N=32 extended to 5 runs 2026-09-29)
 Headline p50 (mean over 3 runs; full p50/p95/p99 + run-to-run sd in the CSV):
 
 | N | all p50 | cache_hit p50 | dht_hit p50 | fallback p50 | success |
@@ -27,6 +27,16 @@ cost, hence the overall p50 climb. The resolver's DHT/fallback tail is ~3–8× 
 expected price of decentralised routing + majority-voted replica reads + store-back over netem —
 while its cache path is competitive. Success stays ≥99.2% across all N (N=32 sits at the emulation
 ceiling; its p99 is the noisiest metric, sd reported not hidden).
+
+**p99 tail-noise at N=32 (2026-09-29, 5 runs).** N=32 was extended from 3 to **5 runs** to test
+whether the p99 spread tightens. It does **not**: overall **p99_sd = 43% of the p99 mean** (2737 ms
+mean, 1175 ms sd), and the dht_hit / fallback series are 41% / 43% — all well above the 30% bar. The
+p50/p95 are stable (overall p50 510.6 ms, p95 1495 ms — within run variance of the 3-run values), so
+only the **p99 tail** is noisy. Cause: at N=32 the slow DHT/fallback queries sit **right against the
+5 s query-timeout ceiling**, so which run has a few queries cross it swings p99 by ~1 s. This is
+inherent to a tail measured next to a hard cutoff and does not shrink with more runs. **Caveat now
+carried in [`A1_latency_vs_N.csv`](A1_latency_vs_N.csv)** (`note` column on the N=32 rows). Any thesis
+claim that leans on N=32 **p99** must cite it with this spread; p50/p95 are the reliable headline.
 
 **Sanity gates (all pass).** Overall p50/p95 reproduce the pre-existing `experiments.csv` nodes-mode
 rows at N=8 (~249–290 / ~887–895) and N=32 (~492–525 / ~1425–1544) within run variance, confirming

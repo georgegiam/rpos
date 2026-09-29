@@ -84,6 +84,7 @@ def _cfg():
         join_stagger=float(os.environ.get("JOIN_STAGGER", "0.4")),
         replication=int(os.environ.get("REPLICATION", "3")),
         succ_list_len=int(os.environ.get("SUCC_LIST_LEN", "3")),
+        upstream_ttl=int(os.environ.get("UPSTREAM_TTL", "300")),
     )
 
 
@@ -106,16 +107,24 @@ def _build_roster(c) -> dict[int, tuple[str, int]]:
             for j in range(c["n"])}
 
 
-def _load_upstream(path: str) -> IterativeResolver | None:
+def _load_upstream(path: str, ttl: int = 300) -> IterativeResolver | None:
     """Build the fallback (iterative) resolver from a DNS MANIFEST.json, so a DHT miss can be
-    resolved once and then stored into the ring. Absent file -> no fallback (miss = NXDOMAIN)."""
+    resolved once and then stored into the ring. Absent file -> no fallback (miss = NXDOMAIN).
+
+    ``ttl`` (env UPSTREAM_TTL, default 300 => all A1-A6 runs byte-identical) is the record TTL
+    the fallback assigns, which becomes BOTH the stored-chunk TTL and the resolver's local-cache
+    retention (node/query.py caches for the decoded ttl). A2's cache-controlled sweep uses it to
+    pin the cache path: UPSTREAM_TTL=0 => the cache never retains, so every query exercises the DHT
+    read path (cold-path curve); a large TTL => a warmed cache stays warm (steady-state curve).
+    Storage never expires chunks and fallback-stored chunks are not ledger-refreshed, so a tiny TTL
+    changes only the cache, not DHT availability or background load."""
     try:
         with open(path) as f:
             recs = json.load(f)["records"]
     except Exception:
         return None
     zone = {d: r["answer_ip"] for d, r in recs.items()}
-    return IterativeResolver(zone=zone, ttl=300, steps=3)
+    return IterativeResolver(zone=zone, ttl=ttl, steps=3)
 
 
 class _DnsProto(asyncio.DatagramProtocol):
@@ -195,7 +204,7 @@ async def _main() -> None:
     self_id = node_id_from_pk(pk)
     roster = _build_roster(c)
     net = SocketNetwork(self_id, roster)
-    upstream = _load_upstream(c["zone_json"])
+    upstream = _load_upstream(c["zone_json"], c["upstream_ttl"])
 
     # Runtime override of the Chord successor-list length (default 3 => no change). chord.py reads
     # SUCC_LIST_LEN as a module global on every _refresh_successor_list round, so setting it here —

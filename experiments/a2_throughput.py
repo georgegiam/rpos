@@ -1,28 +1,27 @@
 #!/usr/bin/env python3
-"""Issue #33 [A2] — Throughput / saturation: analysis, table, and plot (Phase 6, examiner point (iii)).
+"""Issue #33 [A2] — Throughput / saturation, CACHE-CONTROLLED analysis (Phase 6, point (iii)).
 
-Reads the per-level snapshots collected by ``experiments/run_a2.sh`` under ``results/a2/``, computes
-success rate + achieved qps + p50/p95/p99 latency at each offered load level (aggregated over the 3
-sweeps with run-to-run spread), locates the saturation point (first offered qps with mean success
-< 95%), writes ``results/A2_throughput.csv``, overlays the frozen Unbound baseline throughput curve
-(``results/baseline_unbound.csv``), and renders ``results/fig_A2_throughput.png``.
+Reads the cache-controlled snapshots collected by ``experiments/run_a2.sh`` under
+``results/a2/<curve>/sweep*/q*/`` (curve in {cold, steady}) and produces TWO clean throughput
+curves at N=32, replacing the old ascending sweep that confounded load with cache warming:
 
-Why only the client CSV (unlike A1)
------------------------------------
-A2 is a throughput/saturation experiment: its metrics are success rate and latency percentiles vs
-offered load. Both come straight from the client-side ``query_gen.py`` CSV
-(``timestamp,domain,resolver_used,latency_ms,success``); no cache/dht/fallback split — and hence no
-client<->node join — is needed here (that was A1's concern). So this reuses A1's parsing/percentile
-helpers but skips the join entirely.
+  * COLD-PATH  — UPSTREAM_TTL=0: the cache never retains, so every query is a DHT read. The
+    conservative (DHT-work) saturation.
+  * STEADY     — UPSTREAM_TTL huge + full pre-warm: every query is served from a warm cache. The
+    cache-assisted throughput ceiling.
 
-The generator-cap diagnostic (CLAUDE.md "flag, don't hide"): ``query_gen.py`` is open-loop but
-bounded by its worker pool. run_a2.sh sizes --max-workers per level so the ring saturates first, but
-we still report ``achieved_qps = rows/duration`` alongside the offered rate. If achieved << offered
-while success stays high, the generator (not the ring) capped that level; if success falls < 95%,
-that is genuine ring saturation. Both are visible in the CSV and the plot.
+For each curve it reports, per offered-qps level (aggregated over sweeps): success rate + sd,
+achieved qps (from the send-timestamp span — the generator-cap check), p50/p95/p99 of successful
+queries, and the node-0 outcome mix (cache_hit / dht_hit / fallback) that PROVES the path
+(COLD ~ all dht_hit, STEADY ~ all cache_hit). It then:
+  * locates the saturation point = first level whose mean success < 95% (issue #33's criterion);
+  * checks p95 is MONOTONICALLY NON-DECREASING with load (the methodology fix — if p95 still falls
+    the cache control failed; this is flagged loudly, not hidden).
 
-Run:  python3 experiments/a2_throughput.py            # reads results/a2/, writes CSV + PNG
-      python3 experiments/a2_throughput.py --no-plot  # table only
+Writes ``results/A2_throughput.csv`` (single provenance — old mixed data removed by the collector)
+and ``results/fig_A2_throughput.png`` (both curves).
+
+Run:  python3 experiments/a2_throughput.py [--no-plot]
 """
 from __future__ import annotations
 
@@ -30,7 +29,6 @@ import argparse
 import csv
 import math
 import statistics
-import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -38,14 +36,15 @@ RESULTS = REPO_ROOT / "results"
 A2_DIR = RESULTS / "a2"
 OUT_CSV = RESULTS / "A2_throughput.csv"
 OUT_FIG = RESULTS / "fig_A2_throughput.png"
-UNBOUND_CSV = RESULTS / "baseline_unbound.csv"
 
-DURATION_S = 30.0            # frozen configured measured window per level (run_a2.sh A2_DURATION),
-                             # recorded as metadata; achieved throughput is derived from send spans
-SAT_THRESHOLD = 95.0         # success-rate % below which a level is "saturated" (issue #33)
+CURVES = ("cold", "steady")
+SAT_THRESHOLD = 95.0    # success-rate % below which a level is "saturated" (issue #33)
+MONO_REL_TOL = 0.90     # p95[i+1] >= 0.90*p95[i] is non-decreasing (10% relative noise band)
+MONO_ABS_TOL = 5.0      # ...and only count a dip larger than 5 ms (ignore sub-ms cache-floor jitter)
+N = 32
 
 
-# ---- percentile — linear-interpolated, identical to experiments/a1_latency_vs_n.py ----
+# ---- stats helpers ----
 def _percentile(sorted_vals: list[float], p: float) -> float:
     if not sorted_vals:
         return float("nan")
@@ -67,151 +66,174 @@ def _mean_sd(vals: list[float]) -> tuple[float, float]:
     if not vals:
         return float("nan"), 0.0
     m = statistics.fmean(vals)
-    sd = statistics.stdev(vals) if len(vals) > 1 else 0.0
-    return m, sd
+    return m, (statistics.stdev(vals) if len(vals) > 1 else 0.0)
 
 
 def load_client_rows(path: Path) -> list[dict]:
-    """Parse a query_gen.py client CSV -> [{ts, latency, success}, ...]. Same schema as A1."""
     out = []
     with open(path, newline="") as f:
         for r in csv.DictReader(f):
-            out.append({
-                "ts": float(r["timestamp"]),
-                "latency": float(r["latency_ms"]),
-                "success": str(r["success"]).strip().lower() == "true",
-            })
+            out.append({"ts": float(r["timestamp"]), "latency": float(r["latency_ms"]),
+                        "success": str(r["success"]).strip().lower() == "true"})
     return out
 
 
-# ---------------------------------------------------------------------------------------
-# Per-level, per-sweep summary, then aggregate across sweeps.
-# ---------------------------------------------------------------------------------------
-class LevelStat:
-    """Aggregated stats for one offered-qps level across all sweeps."""
+def load_node_outcomes(level_dir: Path) -> dict[str, int]:
+    """Pool node-side outcomes over ALL nodes' logs for a level (cold = distributed entry, so every
+    node logs; steady = funnel, only node 0 logs). Proves the path: cold ~ all dht_hit, steady ~ all
+    cache_hit, both ~ no fallback (DHT fully pre-warmed)."""
+    counts = {"cache_hit": 0, "dht_hit": 0, "fallback": 0}
+    ring_dir = level_dir / "ring"
+    if not ring_dir.is_dir():
+        return counts
+    for p in sorted(ring_dir.glob("*_queries.csv")):
+        with open(p, newline="") as f:
+            for r in csv.DictReader(f):
+                o = str(r["outcome"]).strip()
+                if o in counts:
+                    counts[o] += 1
+    return counts
 
+
+def achieved_qps(rows: list[dict]) -> float:
+    """Offered rate actually realised = (n-1)/send-span. If << offered while success high, the
+    generator (not the ring) capped this level; if success < 95%, it is genuine saturation."""
+    if len(rows) < 2:
+        return float("nan")
+    ts = sorted(r["ts"] for r in rows)
+    span = ts[-1] - ts[0]
+    return (len(rows) - 1) / span if span > 0 else float("nan")
+
+
+# ---- per-(curve, level) aggregation over sweeps ----
+class Level:
     def __init__(self, qps: int) -> None:
         self.qps = qps
         self.sweeps = 0
-        self.rows = 0                       # summed over sweeps
-        self.ok = 0
-        self.run_success: list[float] = []  # per-sweep success %
-        self.run_achieved: list[float] = [] # per-sweep achieved qps
+        self.rows = self.ok = 0
+        self.run_success: list[float] = []
+        self.run_achieved: list[float] = []
         self.run_p50: list[float] = []
         self.run_p95: list[float] = []
         self.run_p99: list[float] = []
+        self.outcomes = {"cache_hit": 0, "dht_hit": 0, "fallback": 0}
 
-    def add_sweep(self, rows: list[dict]) -> None:
-        if not rows:
+    def add_sweep(self, client: list[dict], node0: dict[str, int]) -> None:
+        if not client:
             return
         self.sweeps += 1
-        succ = [r for r in rows if r["success"]]
-        self.rows += len(rows)
+        self.rows += len(client)
+        succ = [r for r in client if r["success"]]
         self.ok += len(succ)
-        self.run_success.append(100.0 * len(succ) / len(rows))
-        # achieved (send) throughput = rows / actual send span. The generator submits exactly
-        # qps×duration rows, so rows/duration is tautologically the offered rate; the real
-        # diagnostic is the SPAN of send timestamps, which stretches past the measured window
-        # only when the worker pool can't keep the offered schedule (a generator cap). Guard the
-        # degenerate 1-row span with the configured window.
-        ts = [r["ts"] for r in rows]
-        span = (max(ts) - min(ts)) if len(ts) > 1 else 0.0
-        self.run_achieved.append(len(rows) / span if span > 0 else float("nan"))
+        self.run_success.append(100.0 * len(succ) / len(client))
+        self.run_achieved.append(achieved_qps(client))
         p50, p95, p99 = _pcts([r["latency"] for r in succ])
-        self.run_p50.append(p50)
-        self.run_p95.append(p95)
-        self.run_p99.append(p99)
+        self.run_p50.append(p50); self.run_p95.append(p95); self.run_p99.append(p99)
+        for k in self.outcomes:
+            self.outcomes[k] += node0.get(k, 0)
 
-    def summary(self) -> dict:
+    def row(self, curve: str) -> dict:
         succ_m, succ_sd = _mean_sd(self.run_success)
         ach_m, _ = _mean_sd(self.run_achieved)
         p50_m, _ = _mean_sd(self.run_p50)
         p95_m, p95_sd = _mean_sd(self.run_p95)
         p99_m, _ = _mean_sd(self.run_p99)
+        tot = sum(self.outcomes.values()) or 1
         return {
-            "offered_qps": self.qps, "achieved_qps": ach_m, "sweeps": self.sweeps,
-            "rows": self.rows, "ok": self.ok,
+            "curve": curve, "offered_qps": self.qps, "achieved_qps": ach_m,
+            "nodes": N, "duration_s": 30, "sweeps": self.sweeps, "rows": self.rows, "ok": self.ok,
             "success_rate_pct": succ_m, "success_sd": succ_sd,
             "p50_ms": p50_m, "p95_ms": p95_m, "p99_ms": p99_m, "p95_sd": p95_sd,
+            "cache_hit_pct": 100.0 * self.outcomes["cache_hit"] / tot,
+            "dht_hit_pct": 100.0 * self.outcomes["dht_hit"] / tot,
+            "fallback_pct": 100.0 * self.outcomes["fallback"] / tot,
         }
 
 
-def discover_levels() -> list[int]:
+def discover_levels(curve_dir: Path) -> list[int]:
     qs: set[int] = set()
-    if A2_DIR.is_dir():
-        for sweep in A2_DIR.glob("sweep*"):
-            if not sweep.is_dir():
-                continue
-            for qdir in sweep.glob("q*"):
-                if qdir.is_dir() and qdir.name[1:].isdigit():
+    for sweep in curve_dir.glob("sweep*"):
+        for qdir in sweep.glob("q*"):
+            if qdir.is_dir():
+                try:
                     qs.add(int(qdir.name[1:]))
+                except ValueError:
+                    pass
     return sorted(qs)
 
 
-def collect() -> list[dict]:
-    levels = discover_levels()
-    if not levels:
+def analyse_curve(curve: str) -> list[dict]:
+    cdir = A2_DIR / curve
+    if not cdir.is_dir():
         return []
-    sweeps = sorted([d for d in A2_DIR.glob("sweep*") if d.is_dir()])
-    stats: list[dict] = []
+    levels = discover_levels(cdir)
+    sweeps = sorted(d for d in cdir.glob("sweep*") if d.is_dir())
+    rows = []
+    print(f"\n== A2 curve '{curve}' (N={N}) ==")
     for q in levels:
-        ls = LevelStat(q)
+        lv = Level(q)
         for sweep in sweeps:
-            client = sweep / f"q{q}" / "client.csv"
-            if client.exists():
-                ls.add_sweep(load_client_rows(client))
-        if ls.sweeps:
-            s = ls.summary()
-            print(f"  [q={q:>3}] sweeps={ls.sweeps} rows={ls.rows} "
-                  f"success={s['success_rate_pct']:5.1f}% (sd {s['success_sd']:.1f}) "
-                  f"achieved={s['achieved_qps']:6.1f}qps p95={s['p95_ms']:7.1f}ms")
-            stats.append(s)
-    return stats
+            client_csv = sweep / f"q{q}" / "client.csv"
+            if client_csv.exists():
+                lv.add_sweep(load_client_rows(client_csv),
+                             load_node_outcomes(sweep / f"q{q}"))
+        if lv.sweeps:
+            r = lv.row(curve)
+            rows.append(r)
+            print(f"  [q={q:>3}] sweeps={lv.sweeps} success={r['success_rate_pct']:5.1f}% "
+                  f"(sd {r['success_sd']:.1f}) achieved={r['achieved_qps']:6.1f} "
+                  f"p95={r['p95_ms']:7.1f}ms  "
+                  f"[cache {r['cache_hit_pct']:.0f}% / dht {r['dht_hit_pct']:.0f}% / "
+                  f"fb {r['fallback_pct']:.0f}%]")
+    return rows
 
 
-def mark_saturation(stats: list[dict]) -> int | None:
-    """Return the lowest offered_qps whose mean success < 95% (the saturation point), or None."""
-    sat = None
-    for s in sorted(stats, key=lambda x: x["offered_qps"]):
-        below = s["success_rate_pct"] < SAT_THRESHOLD
-        s["saturated"] = below
-        if below and sat is None:
-            sat = s["offered_qps"]
-    return sat
+def saturation_qps(rows: list[dict]) -> int | None:
+    for r in sorted(rows, key=lambda x: x["offered_qps"]):
+        if r["success_rate_pct"] < SAT_THRESHOLD:
+            return r["offered_qps"]
+    return None
 
 
-# ---------------------------------------------------------------------------------------
-# Unbound baseline overlay (already a per-qps throughput sweep).
-# ---------------------------------------------------------------------------------------
-def load_unbound() -> list[dict]:
-    if not UNBOUND_CSV.exists():
-        return []
-    out = []
-    with open(UNBOUND_CSV, newline="") as f:
-        for r in csv.DictReader(f):
-            out.append({
-                "offered_qps": float(r["offered_qps"]),
-                "success_rate_pct": float(r["success_rate_pct"]),
-                "p95_ms": float(r["p95_ms"]),
-            })
-    return sorted(out, key=lambda x: x["offered_qps"])
+def p95_monotonic(rows: list[dict]) -> tuple[bool, list[tuple[int, float]]]:
+    """Is p95 monotonically non-decreasing with load over the NON-saturated region?
+
+    The cache-warming confound (the bug this redo fixes) shows as p95 FALLING while success is still
+    high — i.e. in the non-saturated region. So we check monotonicity only over levels with mean
+    success >= 95% (once saturated, p95-of-*successful* can legitimately fall by survivor bias as slow
+    queries time out and drop from the success set — a different, expected effect). A dip counts as a
+    violation only if it is both >10% relative AND >5 ms absolute (so sub-ms cache-floor jitter on the
+    steady curve does not trip it). Returns (ok, [(qps, p95)...]) over the checked region."""
+    checked = [r for r in sorted(rows, key=lambda x: x["offered_qps"])
+               if r["success_rate_pct"] >= SAT_THRESHOLD]
+    seq = [(r["offered_qps"], r["p95_ms"]) for r in checked]
+    ok = True
+    for (_, prev), (_, cur) in zip(seq, seq[1:]):
+        if math.isnan(prev) or math.isnan(cur):
+            continue
+        if cur < MONO_REL_TOL * prev and (prev - cur) > MONO_ABS_TOL:
+            ok = False
+    return ok, seq
 
 
-# ---------------------------------------------------------------------------------------
-# CSV.
-# ---------------------------------------------------------------------------------------
-FIELDS = ["offered_qps", "achieved_qps", "duration_s", "warmup_s", "nodes", "seed", "netem",
-          "sweeps", "rows", "ok", "success_rate_pct", "success_sd",
-          "p50_ms", "p95_ms", "p99_ms", "p95_sd", "saturated"]
+def cache_state_constant(rows: list[dict]) -> tuple[float, float]:
+    """The real confound test: does the per-level cache path stay CONSTANT across load? Returns
+    (stdev of cache_hit_pct, stdev of dht_hit_pct) across levels. Near-zero => cache state is pinned
+    (cold: dht every level; steady: cache every level), so no accumulation-with-load can bias p95."""
+    ch = [r["cache_hit_pct"] for r in rows if not math.isnan(r["cache_hit_pct"])]
+    dh = [r["dht_hit_pct"] for r in rows if not math.isnan(r["dht_hit_pct"])]
+    ch_sd = statistics.stdev(ch) if len(ch) > 1 else 0.0
+    dh_sd = statistics.stdev(dh) if len(dh) > 1 else 0.0
+    return ch_sd, dh_sd
 
-# frozen run metadata (PARAMETERS.md / run_a2.sh defaults) — recorded per row for a self-contained
-# deliverable, matching the baseline_unbound.csv style.
-META = {"duration_s": int(DURATION_S), "warmup_s": 30, "nodes": 32, "seed": 20260919, "netem": "on"}
+
+# ---- CSV ----
+FIELDS = ["curve", "offered_qps", "achieved_qps", "nodes", "duration_s", "sweeps", "rows", "ok",
+          "success_rate_pct", "success_sd", "p50_ms", "p95_ms", "p99_ms", "p95_sd",
+          "cache_hit_pct", "dht_hit_pct", "fallback_pct", "p95_monotonic_ok", "saturated", "note"]
 
 
 def _fmt(v) -> str:
-    if isinstance(v, bool):
-        return "True" if v else "False"
     if isinstance(v, float):
         return "" if math.isnan(v) else f"{v:.3f}"
     return str(v)
@@ -224,27 +246,23 @@ def _rel(p: Path) -> str:
         return str(p)
 
 
-def write_csv(stats: list[dict]) -> None:
+def write_csv(all_rows: list[dict]) -> None:
     with open(OUT_CSV, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=FIELDS)
         w.writeheader()
-        for s in sorted(stats, key=lambda x: x["offered_qps"]):
-            row = {**META, **s}
-            w.writerow({k: _fmt(row.get(k, "")) for k in FIELDS})
-    print(f"\nwrote {_rel(OUT_CSV)} ({len(stats)} levels)")
+        for r in all_rows:
+            w.writerow({k: _fmt(r.get(k, "")) for k in FIELDS})
+    print(f"\nwrote {_rel(OUT_CSV)} ({len(all_rows)} rows)")
 
 
-# ---------------------------------------------------------------------------------------
-# Plot: success rate + p95 latency vs offered qps, with the saturation crossing marked and the
-# Unbound baseline overlaid. Style mirrors experiments/a1_latency_vs_n.py.
-# ---------------------------------------------------------------------------------------
-def make_plot(stats: list[dict], unbound: list[dict], sat_qps: int | None) -> None:
+# ---- plot ----
+def make_plot(by_curve: dict[str, list[dict]], sat: dict[str, int | None]) -> None:
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     INK, MUTED, GRID = "#0b0b0b", "#52514e", "#d9d8d4"
-    RPOS, UNB, SAT = "#2a78d6", "#8a1c5a", "#eb6834"
+    COLD, STEADY, SATC = "#2a78d6", "#8a1c5a", "#c23b22"
     plt.rcParams.update({
         "figure.facecolor": "#fcfcfb", "axes.facecolor": "#fcfcfb",
         "axes.edgecolor": MUTED, "axes.labelcolor": INK, "text.color": INK,
@@ -252,51 +270,38 @@ def make_plot(stats: list[dict], unbound: list[dict], sat_qps: int | None) -> No
         "axes.grid": True, "grid.color": GRID, "grid.linewidth": 0.6,
         "axes.axisbelow": True, "figure.dpi": 150,
     })
-
-    st = sorted(stats, key=lambda x: x["offered_qps"])
-    xs = [s["offered_qps"] for s in st]
+    colour = {"cold": COLD, "steady": STEADY}
     fig, axes = plt.subplots(1, 2, figsize=(11, 4.4))
 
-    # --- panel 1: success rate vs offered qps ---
     ax = axes[0]
-    ys = [s["success_rate_pct"] for s in st]
-    es = [s["success_sd"] for s in st]
-    ax.errorbar(xs, ys, yerr=es, marker="o", ms=5, lw=1.8, capsize=3, color=RPOS, label="rpos ring")
-    if unbound:
-        ax.plot([u["offered_qps"] for u in unbound], [u["success_rate_pct"] for u in unbound],
-                marker="s", ms=4, lw=1.4, ls="--", color=UNB, label="Unbound")
-    ax.axhline(SAT_THRESHOLD, color=SAT, ls=":", lw=1.4, label=f"{SAT_THRESHOLD:.0f}% threshold")
-    if sat_qps is not None:
-        ax.axvline(sat_qps, color=SAT, ls="-", lw=1.2, alpha=0.6)
-        # point at the saturated level in open space below the curve (avoids the 100% cluster)
-        sat_row = next((s for s in st if s["offered_qps"] == sat_qps), None)
-        sat_y = sat_row["success_rate_pct"] if sat_row else SAT_THRESHOLD
-        ax.annotate(f"saturation ≈ {sat_qps} qps", xy=(sat_qps, sat_y), xytext=(sat_qps + 12, 45),
-                    textcoords="data", color=SAT, fontsize=9,
-                    arrowprops=dict(arrowstyle="->", color=SAT, lw=1.1))
-    ax.set_xlabel("offered load (qps)")
-    ax.set_ylabel("success rate (%)")
-    ax.set_ylim(0, 103)
-    ax.set_title("Success rate vs offered load")
-    ax.legend(frameon=False, fontsize=9)
+    for curve in CURVES:
+        rows = sorted(by_curve.get(curve, []), key=lambda x: x["offered_qps"])
+        if not rows:
+            continue
+        xs = [r["offered_qps"] for r in rows]
+        ax.errorbar(xs, [r["success_rate_pct"] for r in rows],
+                    yerr=[r["success_sd"] for r in rows], marker="o", ms=5, lw=1.8, capsize=3,
+                    color=colour[curve], label=f"{curve}-path")
+        if sat.get(curve):
+            ax.axvline(sat[curve], color=colour[curve], ls=":", lw=1.2)
+    ax.axhline(SAT_THRESHOLD, color=SATC, ls="--", lw=1.0, label="95% line")
+    ax.set_xlabel("offered qps"); ax.set_ylabel("success rate (%)"); ax.set_ylim(0, 105)
+    ax.set_title(f"A2 — success vs load (N={N}, node-0 entry)")
+    ax.legend(frameon=False, fontsize=8)
 
-    # --- panel 2: p95 latency vs offered qps ---
     ax = axes[1]
-    ys = [s["p95_ms"] for s in st]
-    es = [s["p95_sd"] for s in st]
-    ax.errorbar(xs, ys, yerr=es, marker="o", ms=5, lw=1.8, capsize=3, color=RPOS, label="rpos ring")
-    if unbound:
-        ax.plot([u["offered_qps"] for u in unbound], [u["p95_ms"] for u in unbound],
-                marker="s", ms=4, lw=1.4, ls="--", color=UNB, label="Unbound")
-    if sat_qps is not None:
-        ax.axvline(sat_qps, color=SAT, ls="-", lw=1.2, alpha=0.6)
-    ax.set_xlabel("offered load (qps)")
-    ax.set_ylabel("p95 latency (ms)")
-    ax.set_yscale("log")
-    ax.set_title("p95 latency vs offered load")
-    ax.legend(frameon=False, fontsize=9)
+    for curve in CURVES:
+        rows = sorted(by_curve.get(curve, []), key=lambda x: x["offered_qps"])
+        if not rows:
+            continue
+        xs = [r["offered_qps"] for r in rows]
+        ax.errorbar(xs, [r["p95_ms"] for r in rows], yerr=[r["p95_sd"] for r in rows],
+                    marker="o", ms=5, lw=1.8, capsize=3, color=colour[curve], label=f"{curve}-path")
+    ax.set_xlabel("offered qps"); ax.set_ylabel("p95 latency of successful (ms)"); ax.set_ylim(bottom=0)
+    ax.set_title("p95 vs load (monotone ⇒ cache controlled)")
+    ax.legend(frameon=False, fontsize=8)
 
-    fig.suptitle("A2 — resolver throughput / saturation at N=32 (vs Unbound baseline)",
+    fig.suptitle("A2 — cache-controlled throughput: cold DHT-path vs steady warm-cache (N=32)",
                  y=1.02, fontsize=12)
     fig.tight_layout()
     fig.savefig(OUT_FIG, bbox_inches="tight")
@@ -304,33 +309,60 @@ def make_plot(stats: list[dict], unbound: list[dict], sat_qps: int | None) -> No
     print(f"wrote {_rel(OUT_FIG)}")
 
 
-# ---------------------------------------------------------------------------------------
 def main() -> int:
-    ap = argparse.ArgumentParser(description="A2 throughput / saturation analysis (issue #33).")
-    ap.add_argument("--no-plot", action="store_true", help="skip the figure")
+    ap = argparse.ArgumentParser(description="A2 cache-controlled throughput analysis (issue #33).")
+    ap.add_argument("--no-plot", action="store_true")
     args = ap.parse_args()
 
     if not A2_DIR.is_dir():
-        print(f"error: {A2_DIR} not found — run experiments/run_a2.sh first", file=sys.stderr)
+        print(f"error: {_rel(A2_DIR)} not found — run experiments/run_a2.sh first")
         return 1
 
-    print("== A2 analysis: throughput / saturation at N=32 ==")
-    stats = collect()
-    if not stats:
-        print(f"error: no sweep*/q*/client.csv snapshots under {A2_DIR} — run run_a2.sh first",
-              file=sys.stderr)
+    by_curve: dict[str, list[dict]] = {}
+    sat: dict[str, int | None] = {}
+    mono: dict[str, tuple[bool, list]] = {}
+    all_rows: list[dict] = []
+    for curve in CURVES:
+        rows = analyse_curve(curve)
+        if not rows:
+            print(f"  (no snapshots for curve '{curve}')")
+            continue
+        by_curve[curve] = rows
+        sat[curve] = saturation_qps(rows)
+        mono[curve] = p95_monotonic(rows)
+        ok, seq = mono[curve]
+        s = sat[curve]
+        note = ""
+        if not ok:
+            note = "p95 NON-MONOTONIC — cache control failed for this curve, investigate"
+        for r in rows:
+            r["p95_monotonic_ok"] = ok
+            r["saturated"] = (s is not None and r["offered_qps"] >= s)
+            r["note"] = note if r["offered_qps"] == rows[0]["offered_qps"] else ""
+        all_rows.extend(rows)
+        ch_sd, dh_sd = cache_state_constant(rows)
+        sat_txt = f"{s} qps" if s is not None else f"none <= {rows[-1]['offered_qps']} qps"
+        print(f"  --> curve '{curve}': saturation (first <95%) = {sat_txt}; "
+              f"p95 non-decreasing over non-saturated region = {ok}")
+        print(f"      cache-state across levels: cache_hit sd={ch_sd:.1f}pp, dht_hit sd={dh_sd:.1f}pp "
+              f"(near-0 ⇒ cache pinned, no accumulation-with-load)")
+        if not ok:
+            print(f"      !! p95 FELL in the non-saturated region: {[(q, round(p, 1)) for q, p in seq]}  "
+                  f"(cache control not working — see note)")
+
+    if not all_rows:
+        print("error: nothing to write")
         return 1
-
-    sat_qps = mark_saturation(stats)
-    if sat_qps is not None:
-        print(f"\nsaturation point (first level < {SAT_THRESHOLD:.0f}% success): {sat_qps} qps")
-    else:
-        print(f"\nno saturation within the tested levels (all ≥ {SAT_THRESHOLD:.0f}% success)")
-
-    write_csv(stats)
-
+    write_csv(all_rows)
     if not args.no_plot:
-        make_plot(stats, load_unbound(), sat_qps)
+        make_plot(by_curve, sat)
+
+    print("\n== A2 summary ==")
+    for curve in CURVES:
+        if curve in sat:
+            s = sat[curve]
+            print(f"  {curve:<7} saturation = {(str(s) + ' qps') if s else 'none in range'};  "
+                  f"p95 monotonic = {mono[curve][0]}")
     return 0
 
 

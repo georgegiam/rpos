@@ -24,12 +24,18 @@ Usage:
         [--ring-port 7000] [--dns-port 5300] [--mode honest]
 """
 import argparse
+import os
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 NET_NAME = "ringnet"
 SUBNET = "172.30.0.0/24"
 IP_BASE = 10          # node j -> 172.30.0.(IP_BASE + j); leaves .1 (gateway) and .2-.9 free
+# Resolver fallback/cache TTL (env UPSTREAM_TTL, default 300 => every existing experiment is
+# byte-identical). A2's cache-controlled sweep passes 0 (cold DHT-path) or a large value
+# (steady warm-cache); see node/run_ring_node._load_upstream. Read from the host env at generate
+# time so callers set it without touching run_experiment.sh.
+UPSTREAM_TTL = os.environ.get("UPSTREAM_TTL", "300")
 
 
 def _service(j: int, n: int, a) -> str:
@@ -59,6 +65,7 @@ def _service(j: int, n: int, a) -> str:
       MAINT_INTERVAL: "1.0"
       REPLICATION: "{a.replication}"
       SUCC_LIST_LEN: "{a.succ_list_len}"
+      UPSTREAM_TTL: "{UPSTREAM_TTL}"
       RING_IP_PREFIX: "172.30.0"
       RING_IP_BASE: "{IP_BASE}"
     volumes:

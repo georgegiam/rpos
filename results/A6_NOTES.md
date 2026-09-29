@@ -51,6 +51,20 @@ Full stats + run-to-run sd in [`A6_churn.csv`](A6_churn.csv).
   (929 → 1693 ms) from stale-routing retries. The ≥60 s points sit in a ~790–1080 ms band with no
   clean monotone trend — the A2 survivorship effect (slow tail queries that time out drop out of
   p95-**of-successful**), so **success rate, not latency-of-successful, is the churn headline**.
+- **The no-churn miss is cold-population, NOT a routing failure (2026-09-29 split).** The ∞ anchor's
+  ~24 % raw-DHT miss was split by classifying each node-side fallback, per domain in time order, into
+  **(a) cold-population** (first touch of an un-warmed Zipf-tail domain — DHT genuinely empty, so it
+  falls back and stores the chunk) vs **(b) populated-but-failed** (the chunk was already in the ring
+  yet the lookup still fell back — a real availability gap). Over 3 fresh no-churn runs (3599/3600
+  lookups attributed): **(a) cold = 23.5 %, (b) gap = 0.19 %** of all lookups. The handful of (b)
+  events are all the *same* two domains with their two fallbacks **108 ms / 485 ms apart** — two
+  client queries racing on the *first* population before the store-back lands, i.e. still cold-start,
+  not a failure to find a committed chunk. So **genuine (b) ≈ 0** and 0.19 % is an upper bound. This
+  is why the 76.3 % anchor is not an availability defect: it is the cold DHT warming itself. New
+  columns `cold_pop_pct` / `real_gap_pct` in [`A6_churn.csv`](A6_churn.csv); figure caption updated.
+  *Caveat:* the classifier cannot see warm-up-era populations, so under **churn** it undercounts (b)
+  (a warm-up chunk lost to churn then re-fetched reads as "cold"); the split is exact only for the
+  no-churn point, which is what was asked. The churn-row `cold`/`gap` values are therefore indicative.
 - **Sim vs emulation** — `churn_sim` (data-availability model, active 1 s repair, no cold-start) sits
   at 96.9 % (30 s) → 100 % (≥60 s): more optimistic than emulation because it *repairs* replicas every
   round and has no first-query cold-start. The emulation (no re-replication, cold-start included) is
@@ -148,7 +162,10 @@ Snapshots land under `results/a6/s<L>/run<r>/{client.csv, ring/<j>_queries.csv, 
 ## Output schema — `A6_churn.csv`
 One row per (source, session length):
 `source, n, mean_session_s, qps, duration_s, runs, raw_dht_success_pct, raw_dht_success_sd,
-e2e_success_pct, e2e_success_sd, p50_ms, p95_ms, p99_ms, p95_sd, fallback_pct, mean_live_pop, note`.
+e2e_success_pct, e2e_success_sd, p50_ms, p95_ms, p99_ms, p95_sd, fallback_pct, mean_live_pop,
+cold_pop_pct, real_gap_pct, real_gap_sd, note`.
 Emulation percentiles/success are the **mean across the 3 runs**; `*_sd` are run-to-run standard
-deviations. `mean_session_s` is `inf` for the no-churn control. The sim rows carry `raw_dht_success`
-(= `churn_sim` success_rate) and `mean_live_pop` only; latency and end-to-end columns are blank.
+deviations. `mean_session_s` is `inf` for the no-churn control (re-measured 2026-09-29 for the
+cold/gap split). `cold_pop_pct` / `real_gap_pct` are the (a)/(b) split of the raw-DHT miss (see the
+headline; exact only for the ∞ row, indicative under churn). The sim rows carry `raw_dht_success`
+(= `churn_sim` success_rate) and `mean_live_pop` only; latency, end-to-end and split columns are blank.

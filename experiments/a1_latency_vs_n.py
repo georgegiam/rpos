@@ -234,11 +234,17 @@ def aggregate_rpos(n: int, run_dirs: list[Path]) -> list[dict]:
         else:
             share, _ = _mean_sd(run_share[s])
             succ_pct, _ = _mean_sd(run_outcome_success[s])
+        # tail-noise caveat: p99 sits near the 5 s query-timeout ceiling, so its run-to-run spread
+        # stays large even at 5 runs. Flag any series whose p99_sd exceeds 30% of the p99 mean.
+        note = ""
+        if not math.isnan(p99_m) and p99_m > 0 and (p99_sd / p99_m) > 0.30:
+            note = (f"p99 tail-noisy: p99_sd={100.0 * p99_sd / p99_m:.0f}% of mean over {n_runs} runs "
+                    f"(tail near the 5s timeout ceiling)")
         rows.append({
             "n": n, "resolver": "rpos", "outcome": s, "runs": n_runs,
             "n_rows": total_rows[s], "share_pct": share, "success_pct": succ_pct,
             "p50_ms": p50_m, "p95_ms": p95_m, "p99_ms": p99_m,
-            "p50_sd": p50_sd, "p95_sd": p95_sd, "p99_sd": p99_sd,
+            "p50_sd": p50_sd, "p95_sd": p95_sd, "p99_sd": p99_sd, "note": note,
         })
     return rows
 
@@ -314,7 +320,7 @@ def cross_check(rpos_rows: list[dict]) -> None:
 # CSV + plot.
 # ---------------------------------------------------------------------------------------
 FIELDS = ["n", "resolver", "outcome", "runs", "n_rows", "share_pct", "success_pct",
-          "p50_ms", "p95_ms", "p99_ms", "p50_sd", "p95_sd", "p99_sd"]
+          "p50_ms", "p95_ms", "p99_ms", "p50_sd", "p95_sd", "p99_sd", "note"]
 
 
 def _fmt(v) -> str:

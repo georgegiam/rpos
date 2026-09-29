@@ -159,6 +159,35 @@ def load_node_rows(run_dir: Path) -> dict[str, list[dict]]:
     return by_domain
 
 
+def classify_cold_gap(node_by_domain: dict[str, list[dict]]) -> tuple[int, int, int]:
+    """Split raw-DHT misses (fallbacks) into (a) cold-population vs (b) populated-but-failed.
+
+    Per domain, in node-side time order, track whether the chunk has become populated (any earlier
+    cache_hit / dht_hit, or a prior fallback whose store-back re-populates it). A fallback is:
+      * (b) real gap  -- the chunk was ALREADY populated in the ring, yet this lookup still fell back;
+      * (a) cold      -- first touch of an un-warmed (Zipf-tail) domain, DHT genuinely empty.
+    Returns (cold_count, gap_count, fallback_count). NOTE (flag, don't hide): two client queries for
+    the same cold domain issued <~1 s apart both see the empty DHT before the first store-back lands;
+    the second is counted (b) here but is really a concurrent cold-population race, not a routing
+    failure -- so the reported (b) is an UPPER BOUND on genuine post-population lookup failures.
+    """
+    cold = gap = fb = 0
+    for _domain, rows in node_by_domain.items():
+        populated = False
+        for r in sorted(rows, key=lambda x: x["ts"]):
+            o = r["outcome"]
+            if o in HIT_OUTCOMES:
+                populated = True
+            elif o == "fallback":
+                fb += 1
+                if populated:
+                    gap += 1
+                else:
+                    cold += 1
+                    populated = True   # store-back populates the chunk going forward
+    return cold, gap, fb
+
+
 def load_mean_live_pop(run_dir: Path, n: int) -> float:
     """Mean live population over the churn window from churn_events.csv; N when no churn (inf)."""
     ev = run_dir / "churn_events.csv"
@@ -183,6 +212,8 @@ class RunMetrics:
         self.mean_live_pop = float("nan")
         self.n_client = 0
         self.n_matched = 0
+        self.cold_pop_pct = float("nan")   # (a) cold-population, % of node-side lookups
+        self.real_gap_pct = float("nan")   # (b) populated-but-failed, % of node-side lookups (upper bound)
 
 
 def analyse_run(run_dir: Path, n: int) -> RunMetrics | None:
@@ -223,6 +254,15 @@ def analyse_run(run_dir: Path, n: int) -> RunMetrics | None:
     m.e2e_success = 100.0 * len(ok) / len(client)
     m.p50, m.p95, m.p99 = _pcts([r["latency"] for r in ok])
     m.mean_live_pop = load_mean_live_pop(run_dir, n)
+
+    # (a)/(b) split of the raw-DHT miss, computed on the node-side outcome sequence (issue: is the
+    # miss cold-population or a real availability gap?). Denominator = node-side lookups (== matched
+    # for the no-churn point, where every query enters and is logged by node 0).
+    cold, gap, _fb = classify_cold_gap(node_by_domain)
+    n_node = sum(len(v) for v in node_by_domain.values())
+    if n_node:
+        m.cold_pop_pct = 100.0 * cold / n_node
+        m.real_gap_pct = 100.0 * gap / n_node
     return m
 
 
@@ -233,6 +273,7 @@ def emulation_row(L: float) -> dict | None:
     runs = sorted(d for d in sdir.glob("run*") if d.is_dir())
     raw, e2e, p95s, fb, live = [], [], [], [], []
     p50s, p99s = [], []
+    cold_l, gap_l = [], []
     matched = client_total = used = 0
     for run in runs:
         m = analyse_run(run, A6_N)
@@ -243,6 +284,7 @@ def emulation_row(L: float) -> dict | None:
         client_total += m.n_client
         raw.append(m.raw_dht_success); e2e.append(m.e2e_success); fb.append(m.fallback_pct)
         p50s.append(m.p50); p95s.append(m.p95); p99s.append(m.p99); live.append(m.mean_live_pop)
+        cold_l.append(m.cold_pop_pct); gap_l.append(m.real_gap_pct)
     if used == 0:
         return None
     match_pct = 100.0 * matched / client_total if client_total else float("nan")
@@ -251,6 +293,14 @@ def emulation_row(L: float) -> dict | None:
     raw_m, raw_sd = _mean_sd(raw)
     e2e_m, e2e_sd = _mean_sd(e2e)
     p95_m, p95_sd = _mean_sd(p95s)
+    cold_m, _ = _mean_sd(cold_l)
+    gap_m, gap_sd = _mean_sd(gap_l)
+    # for the no-churn (inf) point, spell out the cold-vs-gap finding in the note (issue request)
+    if not math.isfinite(L):
+        note = (f"no-churn: raw-DHT miss is cold-population (a)={cold_m:.1f}% not routing failure; "
+                f"populated-but-failed (b)={gap_m:.2f}% (upper bound, sub-second cold races)")
+    else:
+        note = "raw-DHT headline; no active re-replication (fallback-on-read only)"
     return {
         "source": "emulation", "n": A6_N, "mean_session_s": L, "qps": A6_QPS,
         "duration_s": A6_DURATION_S, "runs": used,
@@ -258,7 +308,8 @@ def emulation_row(L: float) -> dict | None:
         "e2e_success_pct": e2e_m, "e2e_success_sd": e2e_sd,
         "p50_ms": _mean_sd(p50s)[0], "p95_ms": p95_m, "p99_ms": _mean_sd(p99s)[0], "p95_sd": p95_sd,
         "fallback_pct": _mean_sd(fb)[0], "mean_live_pop": _mean_sd(live)[0],
-        "note": "raw-DHT headline; no active re-replication (fallback-on-read only)",
+        "cold_pop_pct": cold_m, "real_gap_pct": gap_m, "real_gap_sd": gap_sd,
+        "note": note,
     }
 
 
@@ -277,6 +328,7 @@ def sim_row(L: float) -> dict:
         "e2e_success_pct": float("nan"), "e2e_success_sd": 0.0,
         "p50_ms": float("nan"), "p95_ms": float("nan"), "p99_ms": float("nan"), "p95_sd": 0.0,
         "fallback_pct": 100.0 * (1.0 - res.success_rate), "mean_live_pop": res.mean_live_pop,
+        "cold_pop_pct": float("nan"), "real_gap_pct": float("nan"), "real_gap_sd": float("nan"),
         "note": f"data-availability model, 1s repair, {res.chunks_lost} chunks lost, no latency",
     }
 
@@ -286,7 +338,8 @@ def sim_row(L: float) -> dict:
 # ---------------------------------------------------------------------------------------
 FIELDS = ["source", "n", "mean_session_s", "qps", "duration_s", "runs",
           "raw_dht_success_pct", "raw_dht_success_sd", "e2e_success_pct", "e2e_success_sd",
-          "p50_ms", "p95_ms", "p99_ms", "p95_sd", "fallback_pct", "mean_live_pop", "note"]
+          "p50_ms", "p95_ms", "p99_ms", "p95_sd", "fallback_pct", "mean_live_pop",
+          "cold_pop_pct", "real_gap_pct", "real_gap_sd", "note"]
 
 
 def _fmt(v) -> str:
@@ -405,6 +458,13 @@ def make_plot(rows: list[dict]) -> None:
 
     fig.suptitle("A6 — churn: lookup availability & latency vs session length (emulation + sim)",
                  y=1.02, fontsize=12)
+    # caption: the no-churn (∞) raw-DHT miss is cold-population, not a routing failure (issue finding)
+    if emu_inf is not None and not math.isnan(emu_inf.get("cold_pop_pct", float("nan"))):
+        fig.text(0.5, -0.04,
+                 f"No-churn (∞) raw-DHT miss is cold-population (first-touch of an un-warmed "
+                 f"Zipf-tail domain): (a) cold={emu_inf['cold_pop_pct']:.1f}%, "
+                 f"(b) populated-but-failed={emu_inf['real_gap_pct']:.2f}% (upper bound) — not a routing failure.",
+                 ha="center", va="top", fontsize=8, color=MUTED)
     fig.tight_layout()
     fig.savefig(OUT_FIG, bbox_inches="tight")
     plt.close(fig)
@@ -436,7 +496,9 @@ def main() -> int:
                 rows.append(r)
                 print(f"  [{stag(L):>5}] runs={r['runs']} raw-DHT={r['raw_dht_success_pct']:5.1f}% "
                       f"e2e={r['e2e_success_pct']:5.1f}% p95={r['p95_ms']:.0f}ms "
-                      f"live≈{r['mean_live_pop']:.1f}")
+                      f"live≈{r['mean_live_pop']:.1f}  "
+                      f"[miss split: (a)cold={r.get('cold_pop_pct', float('nan')):.1f}% "
+                      f"(b)gap={r.get('real_gap_pct', float('nan')):.2f}%]")
             if not rows:
                 print("  (no emulation snapshots found — run experiments/run_a6.sh, or use --sim-only)")
 
