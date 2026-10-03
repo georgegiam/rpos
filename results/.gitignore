@@ -49,3 +49,7 @@ a6/
 # figure (fig_A7_admission.png) and A7_NOTES.md are not *.csv, so already tracked. A7 is a
 # microbenchmark (no Docker) and writes the summary directly — there is no per-run raw snapshot dir.
 !A7_admission.csv
+# Phase 7 B0 deliverable: experimental threat-model table (experiments/b0_threat_model.py). A
+# design artifact (no measurement/RNG) regenerated deterministically; B0_threat_model.md is not
+# *.csv, so already tracked.
+!B0_threat_model.csv
