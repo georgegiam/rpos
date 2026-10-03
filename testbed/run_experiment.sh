@@ -43,6 +43,7 @@
 #   --health-timeout S seconds to wait for the stack to become healthy [180]
 #   --replication S    nodes-mode chunk replication factor s [3]  (A4 sweep, issue #35)
 #   --succ-list-len L  nodes-mode Chord successor-list length [3] (raise for s>4)
+#   --malicious-indices "i,j,..."  nodes-mode: node indices to run malicious (B1, issue #42) [none]
 #   --keep-up          do NOT tear the stack down at the end
 #   -h, --help         show this help
 #
@@ -69,6 +70,9 @@ EXPMODE=host; RING_PORT=7000; DNS_PORT=5300; PLOT_N=1024; DRG_INDEGREE=2
 # other experiment/caller is byte-identical. SUCC_LIST_LEN lengthens the successor list a replica
 # set of s>4 needs (applied as a runtime override in run_ring_node; chord.py stays byte-identical).
 REPLICATION=3; SUCC_LIST_LEN=3
+# B1 (issue #42): comma list of node indices to run malicious (lie). Empty => all honest => every
+# non-B1 experiment byte-identical. Forwarded verbatim to gen_nodes_compose.py --malicious-indices.
+MALICIOUS_INDICES=""
 
 # Print the leading comment banner (lines 2.. up to `set -euo`) as help text.
 usage() { awk 'NR>1 && /^set -euo/{exit} NR>1{sub(/^# ?/,"");print}' "$0"; }
@@ -144,7 +148,8 @@ run_nodes_mode() {
     note "generating docker-compose.nodes.yml for N=$N ring nodes"
     python3 gen_nodes_compose.py --nodes "$N" --plot-n "$PLOT_N" --drg-indegree "$DRG_INDEGREE" \
         --seed "$SEED" --ring-port "$RING_PORT" --dns-port "$DNS_PORT" \
-        --replication "$REPLICATION" --succ-list-len "$SUCC_LIST_LEN"
+        --replication "$REPLICATION" --succ-list-len "$SUCC_LIST_LEN" \
+        --malicious-indices "$MALICIOUS_INDICES"
     local j
     for j in $(seq 0 $((N - 1))); do
         mkdir -p "$REPO_ROOT/results/ring/$j"
@@ -174,8 +179,19 @@ except Exception:
     print('')
 " 2>/dev/null | tr -d '[:space:]' || true)
         fi
-        if [ "$healthy" -ge "$N" ] && [ "$probe" = "$PROBE_ANSWER" ]; then
-            echo "  $healthy/$N nodes healthy; ring resolves ($PROBE_DOMAIN -> $probe)"
+        # Acceptance: ring converged (all healthy) AND resolves the probe. Normally the probe answer
+        # must MATCH the honest answer_ip; but B1 (issue #42) deliberately forges answers, so when
+        # malicious nodes are present the probe chunk may resolve to the forged 6.6.6.6 — then the
+        # gate only requires a VALID A record (liveness/convergence, not integrity). Default (no
+        # --malicious-indices) is unchanged: the honest-answer match is still required.
+        if [ -n "$MALICIOUS_INDICES" ]; then
+            probe_ok=$([ -n "$probe" ] && echo 1 || echo 0)
+        else
+            probe_ok=$([ "$probe" = "$PROBE_ANSWER" ] && echo 1 || echo 0)
+        fi
+        if [ "$healthy" -ge "$N" ] && [ "$probe_ok" -eq 1 ]; then
+            echo "  $healthy/$N nodes healthy; ring resolves ($PROBE_DOMAIN -> ${probe:-<none>}"\
+"${MALICIOUS_INDICES:+; malicious-present: any-A accepted})"
             break
         fi
         [ "$(date +%s)" -lt "$deadline" ] || fail "ring not healthy within ${HEALTH_TIMEOUT}s (healthy=$healthy/$N, probe='${probe:-<none>}')"
@@ -257,6 +273,7 @@ while [ $# -gt 0 ]; do
         --health-timeout) HEALTH_TIMEOUT="$2"; shift 2 ;;
         --replication)    REPLICATION="$2"; shift 2 ;;
         --succ-list-len)  SUCC_LIST_LEN="$2"; shift 2 ;;
+        --malicious-indices) MALICIOUS_INDICES="$2"; shift 2 ;;
         --keep-up)        KEEP_UP=1; shift ;;
         -h|--help)        usage; exit 0 ;;
         *) echo "unknown argument: $1" >&2; echo "try: $0 --help" >&2; exit 2 ;;

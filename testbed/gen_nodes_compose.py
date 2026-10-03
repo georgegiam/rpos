@@ -41,6 +41,11 @@ UPSTREAM_TTL = os.environ.get("UPSTREAM_TTL", "300")
 def _service(j: int, n: int, a) -> str:
     ip = f"172.30.0.{IP_BASE + j}"
     role = "seed" if j == 0 else "join"
+    # B1 (issue #42): per-node malicious placement. Node j runs a.malicious_mode iff it is in the
+    # selected set (computed host-side by experiments/b1_placement.py and passed via
+    # --malicious-indices); every other node keeps the uniform --mode (default honest). The set is
+    # empty by default → every node honest → this compose is byte-identical to pre-B1 (CLAUDE.md §2).
+    node_mode = a.malicious_mode if j in a.malicious_set else a.mode
     return f"""  rpos-node-{j}:
     build:
       context: ..
@@ -61,7 +66,7 @@ def _service(j: int, n: int, a) -> str:
       DRG_INDEGREE: "{a.drg_indegree}"
       CHALLENGE_TIMEOUT: "{a.challenge_timeout}"
       SEED: "{a.seed}"
-      MALICIOUS_MODE: "{a.mode}"
+      MALICIOUS_MODE: "{node_mode}"
       MAINT_INTERVAL: "1.0"
       REPLICATION: "{a.replication}"
       SUCC_LIST_LEN: "{a.succ_list_len}"
@@ -121,11 +126,25 @@ def main() -> int:
     # (SUCC_LIST_LEN), applied as a runtime override in run_ring_node (chord.py stays byte-identical).
     ap.add_argument("--replication", type=int, default=3, help="chunk replication factor s")
     ap.add_argument("--succ-list-len", type=int, default=3, help="Chord successor-list length")
+    # B1 (issue #42): make a chosen subset of nodes malicious. --malicious-indices is a comma list
+    # of node indices (e.g. "6,9"); those run --malicious-mode (default "lie") while the rest keep
+    # --mode. Default "" => no malicious nodes => every existing experiment byte-identical.
+    ap.add_argument("--malicious-indices", default="",
+                    help="comma-separated node indices to run in --malicious-mode (default none)")
+    ap.add_argument("--malicious-mode", default="lie",
+                    help="mode applied to --malicious-indices nodes (default lie)")
     a = ap.parse_args()
     if a.nodes < 1:
         ap.error("--nodes must be >= 1")
     if a.nodes > 240:
         ap.error("--nodes must be <= 240 (static /24 IP range)")
+    try:
+        a.malicious_set = {int(x) for x in a.malicious_indices.split(",") if x.strip() != ""}
+    except ValueError:
+        ap.error(f"--malicious-indices must be a comma list of ints, got {a.malicious_indices!r}")
+    bad = {i for i in a.malicious_set if i < 0 or i >= a.nodes}
+    if bad:
+        ap.error(f"--malicious-indices out of range for N={a.nodes}: {sorted(bad)}")
     a.out.write_text(render(a.nodes, a))
     print(f"wrote {a.out} ({a.nodes} nodes, seed=rpos-node-0, subnet {SUBNET})")
     return 0

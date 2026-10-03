@@ -1,0 +1,6 @@
+block,f_pct,n_mal,realized_f_pct,runs,forged_accepted_pct,forged_accepted_sd,forged_distinct_pct,bound_majority_pct,bound_single_pct,structural_majority_pct,structural_single_pct,success_rate_pct,success_sd,p50_ms,p95_ms,p99_ms,target,target_forged_pct,note
+random,0,0,0.0000,2,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,99.8333,0.0000,28.2520,945.9860,1221.5395,,,honest control
+random,20,6,18.7500,2,39.5320,13.9777,40.9091,9.2285,46.3623,9.2500,37.0000,99.6667,0.2357,3.0285,899.7502,1329.6226,,,
+random,40,13,40.6250,2,84.1509,4.2649,79.6296,36.1023,79.0680,41.2000,79.8000,99.9167,0.1179,3.1402,642.7545,960.0722,,,
+random,50,16,50.0000,2,90.2500,6.0104,87.4486,50.0000,87.5000,56.6000,87.4000,100.0000,0.0000,3.0600,600.1147,711.2807,,,
+targeted,6,2,6.2500,1,26.0434,0.0000,16.4609,1.1230,17.6025,7.9000,13.3000,99.8333,0.0000,3.1650,923.0084,1313.9551,google.com,100.0000,colluding: 2 nodes co-located on one chunk's replica set (crosses the bound)

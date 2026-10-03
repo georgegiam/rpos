@@ -63,6 +63,17 @@ Notes:
   (imports only); every other parameter is the frozen default (seed 20260919, δ challenge timeout
   2.0 s).
 
+- **B1 (issue #42) sweeps the adversary fraction `f`** over {0, 10, 20, 30, 40, 50}% →
+  `n_mal = round(f·32) = {0,3,6,10,13,16}` malicious (`lie`) nodes at N=32 (random placement,
+  node 0 always honest, resampled per run), plus a targeted co-location demo. It is set via the
+  additive `--malicious-indices` env/flag on `gen_nodes_compose.py` (threaded through
+  `run_experiment.sh`), computed host-side by `experiments/b1_placement.py`; the default is **no
+  malicious nodes**, so every non-B1 experiment's compose is byte-identical. Forgery is detected by
+  `query_gen.py --check-answers` (off by default → CSV byte-identical). B1's measured window is
+  **120 s @ 10 qps** (longer than A4's 30 s to sample more distinct Zipf chunks); all other
+  parameters are the frozen defaults (N=32, s=3, seed 20260919, δ=2 s, netem 5/50 ms, Zipf α=1.0).
+  No protocol code or frozen artifact is touched (the `lie` behaviour + majority vote already exist).
+
 ---
 
 ## 2. Sanity check — measured hops vs Chord theory

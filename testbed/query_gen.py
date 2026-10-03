@@ -164,22 +164,35 @@ def _resolve_host(host: str) -> str:
     return ip
 
 
-def run_query(resolver: str, port: int, domain: str, timeout: float) -> tuple[float, bool]:
-    """Send one A query over UDP. Returns (latency_ms, success).
+def run_query(resolver: str, port: int, domain: str, timeout: float) -> tuple[float, bool, str]:
+    """Send one A query over UDP. Returns (latency_ms, success, answer_ip).
 
     success is True only when the response is NOERROR and carries at least one A record;
-    timeouts and any other error return (time-to-failure, False).
+    timeouts and any other error return (time-to-failure, False, ""). answer_ip is the first A
+    record's address ("" when none) — used by --check-answers to detect a forged reply (B1).
     """
     query = dns.message.make_query(domain, dns.rdatatype.A)
     start = time.perf_counter()
     try:
         resp = dns.query.udp(query, _resolve_host(resolver), port=port, timeout=timeout)
         latency_ms = (time.perf_counter() - start) * 1000.0
-        ok = resp.rcode() == dns.rcode.NOERROR and any(
-            rr.rdtype == dns.rdatatype.A for rr in resp.answer)
-        return latency_ms, ok
+        a_ips = [item.address for rr in resp.answer if rr.rdtype == dns.rdatatype.A for item in rr]
+        ok = resp.rcode() == dns.rcode.NOERROR and bool(a_ips)
+        return latency_ms, ok, (a_ips[0] if a_ips else "")
     except (dns.exception.Timeout, OSError, dns.exception.DNSException):
-        return (time.perf_counter() - start) * 1000.0, False
+        return (time.perf_counter() - start) * 1000.0, False, ""
+
+
+def load_expected(manifest: Path) -> dict[str, str]:
+    """domain -> ground-truth answer_ip from the zones MANIFEST (for --check-answers / B1).
+
+    The same authoritative A target the ring serves on an honest resolution; a reply whose A
+    record differs from this is a forgery (node/malicious.py returns 6.6.6.6)."""
+    if not manifest.exists():
+        raise SystemExit(f"--check-answers needs {manifest} (run the testbed once to generate zones)")
+    with open(manifest) as f:
+        records = json.load(f)["records"]
+    return {d: rec.get("answer_ip", "") for d, rec in records.items()}
 
 
 def main() -> int:
@@ -213,6 +226,10 @@ def main() -> int:
                     help="ring node hostname prefix (default rpos-node-)")
     ap.add_argument("--ring-dns-port", type=int, default=5300,
                     help="ring node DNS UDP port (default 5300)")
+    # B1 (issue #42): compare each reply's A record to the ground-truth answer_ip and log forgery.
+    # Off by default -> CSV header/rows byte-identical to A-series (CLAUDE.md §2).
+    ap.add_argument("--check-answers", action="store_true",
+                    help="append expected_ip,answer_ip,forged columns (detect forged replies, B1)")
     args = ap.parse_args()
 
     if args.qps <= 0 or args.duration <= 0:
@@ -237,14 +254,16 @@ def main() -> int:
           f"(~{args.duration}s) to {where} (alpha={args.alpha}, seed={args.seed})",
           file=sys.stderr)
 
-    rows: list[tuple[float, str, str, float, bool]] = []
+    expected = load_expected(args.manifest) if args.check_answers else {}
+
+    rows: list[tuple[float, str, str, float, bool, str]] = []
     rows_lock = Lock()
 
     def dispatch(domain: str, host: str, port: int, label: str) -> None:
         sent = time.time()
-        latency_ms, ok = run_query(host, port, domain, args.timeout)
+        latency_ms, ok, a_ip = run_query(host, port, domain, args.timeout)
         with rows_lock:
-            rows.append((sent, domain, label, latency_ms, ok))
+            rows.append((sent, domain, label, latency_ms, ok, a_ip))
 
     t0 = time.perf_counter()
     with ThreadPoolExecutor(max_workers=args.max_workers) as pool:
@@ -262,13 +281,26 @@ def main() -> int:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with open(args.output, "w", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["timestamp", "domain", "resolver_used", "latency_ms", "success"])
-        for sent, domain, label, latency_ms, ok in rows:
-            w.writerow([f"{sent:.6f}", domain, label, f"{latency_ms:.3f}", ok])
+        if args.check_answers:
+            w.writerow(["timestamp", "domain", "resolver_used", "latency_ms", "success",
+                        "expected_ip", "answer_ip", "forged"])
+            for sent, domain, label, latency_ms, ok, a_ip in rows:
+                exp = expected.get(domain, "")
+                forged = bool(a_ip) and a_ip != exp
+                w.writerow([f"{sent:.6f}", domain, label, f"{latency_ms:.3f}", ok,
+                            exp, a_ip, forged])
+        else:
+            w.writerow(["timestamp", "domain", "resolver_used", "latency_ms", "success"])
+            for sent, domain, label, latency_ms, ok, a_ip in rows:
+                w.writerow([f"{sent:.6f}", domain, label, f"{latency_ms:.3f}", ok])
 
     ok_n = sum(1 for r in rows if r[4])
+    extra = ""
+    if args.check_answers:
+        forged_n = sum(1 for r in rows if r[5] and r[5] != expected.get(r[1], ""))
+        extra = f", {forged_n} forged"
     print(f"[done] wrote {len(rows)} rows to {args.output} ({ok_n} success, "
-          f"{len(rows) - ok_n} failed)", file=sys.stderr)
+          f"{len(rows) - ok_n} failed{extra})", file=sys.stderr)
     return 0
 
 
