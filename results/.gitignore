@@ -60,3 +60,7 @@ a6/
 # — regenerable from the fixed seed (CLAUDE.md §2), so not committed; B1_tampering.csv is the
 # committed summary.
 b1/
+# Phase 7 B2 deliverable: targeted-capture / ID-grinding table (experiments/b2_grinding.py). The
+# figure (fig_B2_targeted.png) and B2_NOTES.md are not *.csv, so already tracked. B2 is a
+# microbenchmark (no Docker) and writes the summary directly — there is no per-run raw snapshot dir.
+!B2_targeted.csv

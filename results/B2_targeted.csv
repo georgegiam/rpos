@@ -1,0 +1,28 @@
+metric,source,strategy,N,s,threshold,window_bits,identities_needed,hashes_expected,hashes_measured,seconds_native,seconds_python,capture_prob,admitted,note
+grind_scale,measured,,32,,,155,,32.0000,54.1250,2.65801e-06,2.93335e-05,,,"empirical grind, 8 reps, mean-gap window"
+grind_scale,measured,,1000,,,150,,1000.0000,904.1250,4.44004e-05,0.000475422,,,"empirical grind, 8 reps, mean-gap window"
+grind_scale,measured,,1000000,,,140,,1e+06,2.13002e+06,0.1046,1.1252,,,"empirical grind, 2 reps, mean-gap window"
+grind_scale,extrapolated,,1000000000,,,130,,1e+09,,49.1087,528.2454,,,geometric E[hashes]=2^160/gap=N; validated at N<=1e6; python@1.89 MH/s
+grind_target,real_ring,targeted,32,3,2,155,2,40.7669,53.0000,2.60276e-06,2.9583e-05,1.0000,,"grind 2 ids into (chunk,primary) of target='google.com'; gap=155 bits; captured=True"
+capture_cost,analytic,random_p50,32,3,2,,16,,,,,0.5000,,hypergeometric: smallest m with P(capture chosen chunk)>=0.5
+capture_cost,analytic,random_p90,32,3,2,,26,,,,,0.9000,,hypergeometric: smallest m with P(capture chosen chunk)>=0.9
+capture_cost,analytic,random_p99,32,3,2,,30,,,,,0.9900,,hypergeometric: smallest m with P(capture chosen chunk)>=0.99
+capture_cost,analytic,targeted_effective,32,3,1,,1,,,,,1.0000,,>=1-of-s vote weakness (B1): 1 plot forges
+capture_cost,analytic,targeted_majority,32,3,2,,2,,,,,1.0000,,co-locate on consecutive replica slots
+capture_cost,analytic,random_p50,1000,3,2,,500,,,,,0.5000,,hypergeometric: smallest m with P(capture chosen chunk)>=0.5
+capture_cost,analytic,random_p90,1000,3,2,,804,,,,,0.9000,,hypergeometric: smallest m with P(capture chosen chunk)>=0.9
+capture_cost,analytic,random_p99,1000,3,2,,941,,,,,0.9900,,hypergeometric: smallest m with P(capture chosen chunk)>=0.99
+capture_cost,analytic,targeted_effective,1000,3,1,,1,,,,,1.0000,,>=1-of-s vote weakness (B1): 1 plot forges
+capture_cost,analytic,targeted_majority,1000,3,2,,2,,,,,1.0000,,co-locate on consecutive replica slots
+capture_cost,analytic,random_p50,1000000,3,2,,500000,,,,,0.5000,,hypergeometric: smallest m with P(capture chosen chunk)>=0.5
+capture_cost,analytic,random_p90,1000000,3,2,,804200,,,,,0.9000,,hypergeometric: smallest m with P(capture chosen chunk)>=0.9
+capture_cost,analytic,random_p99,1000000,3,2,,941097,,,,,0.9900,,hypergeometric: smallest m with P(capture chosen chunk)>=0.99
+capture_cost,analytic,targeted_effective,1000000,3,1,,1,,,,,1.0000,,>=1-of-s vote weakness (B1): 1 plot forges
+capture_cost,analytic,targeted_majority,1000000,3,2,,2,,,,,1.0000,,co-locate on consecutive replica slots
+capture_cost,analytic,random_p50,1000000000,3,2,,500000000,,,,,0.5000,,hypergeometric: smallest m with P(capture chosen chunk)>=0.5
+capture_cost,analytic,random_p90,1000000000,3,2,,804199895,,,,,0.9000,,hypergeometric: smallest m with P(capture chosen chunk)>=0.9
+capture_cost,analytic,random_p99,1000000000,3,2,,941096864,,,,,0.9900,,hypergeometric: smallest m with P(capture chosen chunk)>=0.99
+capture_cost,analytic,targeted_effective,1000000000,3,1,,1,,,,,1.0000,,>=1-of-s vote weakness (B1): 1 plot forges
+capture_cost,analytic,targeted_majority,1000000000,3,2,,2,,,,,1.0000,,co-locate on consecutive replica slots
+admission_demo,admission_inproc,targeted,8,3,1,,1,8.0000,8.0000,3.92869e-07,,1.0000,yes,grinded pk admitted (real v3 plot+challenge) & became primary of target='google.com'; forged_served=True
+control,real_ring,honest,32,3,2,,0,,,,,0.0000,,f=0 honest control: structural capture over all served chunks
