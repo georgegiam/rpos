@@ -1,0 +1,11 @@
+source,block,axis,intensity,f_pct,n_mal,realized_f_pct,runs,arm,honest_success_pct,honest_success_sd,p50_ms,p95_ms,p99_ms,offered_rpc_per_s,measured_rpc_per_s,ring_correct_succ_pct,ring_orphans,protocol_delta_pct,note
+inproc,flood,concurrency,0,,,,3,attack,100.0000,0.0000,18.6638,26.7283,28.3387,,0.0000,100.0000,0.0000,0.0000,honest control (no flood)
+inproc,flood,concurrency,0,,,,3,control,100.0000,0.0000,18.5666,27.0961,28.0746,,0.0000,100.0000,0.0000,,matched-volume honest load
+inproc,flood,concurrency,50,,,,3,attack,85.5556,6.9389,356.5273,5001.2241,5001.2599,,26.1667,80.2083,6.3300,4.4444,
+inproc,flood,concurrency,50,,,,3,control,90.0000,7.2648,686.5913,4699.8247,5001.2513,,25.0000,79.1667,6.6700,,matched-volume honest load
+inproc,flood,concurrency,100,,,,3,attack,88.3333,1.6667,19.7996,5001.2441,5001.2938,,50.0000,78.1250,7.0000,3.8889,
+inproc,flood,concurrency,100,,,,3,control,92.2222,1.9245,18.6188,5000.9474,5001.2966,,50.0000,78.1250,7.0000,,matched-volume honest load
+inproc,flood,concurrency,200,,,,3,attack,92.2222,5.8531,19.4807,4674.7468,4808.5784,,100.0000,79.1667,6.6700,1.6667,
+inproc,flood,concurrency,200,,,,3,control,93.8889,5.0918,18.5874,3742.4239,4816.2695,,100.0000,78.1250,7.0000,,matched-volume honest load
+inproc,flood,concurrency,400,,,,3,attack,88.8889,4.8113,19.7550,5001.2137,5001.2674,,200.0000,78.1250,7.0000,4.4444,
+inproc,flood,concurrency,400,,,,3,control,93.3333,3.3333,19.3719,4684.3068,5001.2445,,200.0000,78.1250,7.0000,,matched-volume honest load

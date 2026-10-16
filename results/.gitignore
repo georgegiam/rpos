@@ -96,3 +96,11 @@ b4/
 # Phase 7 B6 raw per-run snapshots (experiments/run_b6.sh) — regenerable from the fixed seed
 # (CLAUDE.md §2), so not committed; the two summaries above are the committed deliverables.
 b6/
+# Phase 7 B7 deliverable: DoS table (experiments/b7_dos.py merges the executed in-process
+# complement + the socket-testbed sweep). The figure (fig_B7_dos.png) and B7_NOTES.md are not
+# *.csv, so already tracked.
+!B7_dos.csv
+# Phase 7 B7 raw per-run snapshots + intermediate B7_inproc.csv (experiments/run_b7.sh +
+# b7_inproc.py) — regenerable from the fixed seed (CLAUDE.md §2), so not committed; B7_dos.csv is
+# the committed summary.
+b7/
