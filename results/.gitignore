@@ -83,3 +83,7 @@ b3/
 # Phase 7 B4 raw per-run snapshots (experiments/run_b4.sh: client.csv + placement.json + ring/)
 # — regenerable from the fixed seed (CLAUDE.md §2), so not committed; B4_eclipse.csv is the summary.
 b4/
+# Phase 7 B5 deliverable: Sybil-vs-PoSpace budget table (experiments/b5_sybil.py). The figure
+# (fig_B5_sybil.png) and B5_NOTES.md are not *.csv, so already tracked. B5 is a microbenchmark (no
+# Docker) and writes the summary directly — there is no per-run raw snapshot dir.
+!B5_sybil.csv

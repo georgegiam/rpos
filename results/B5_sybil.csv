@@ -1,0 +1,55 @@
+metric,source,scheme,plot_n,plot_bytes,plot_h,storage_budget_bytes,storage_budget_h,N_honest,identities,f,control_primary,control_forge_1ofs,control_majority,plot_seconds_native,note
+sybil_yield,analytic,pospace_v3_testplot,1024,32768,32 KiB,1073741824,1 GiB,,32768,,,,,5.0354e-05,"TEST plot 2^10 (32 KiB): trivially Sybil-able -- emulation scale, not security scale"
+sybil_yield,analytic,pospace_v3,3355443200,107374182400,100 GiB,107374182400,100 GiB,,1,,,,,165.0000,identities = budget / (100 GiB/plot); delta=2
+sybil_yield,analytic,pospace_v3,3355443200,107374182400,100 GiB,1099511627776,1 TiB,,10,,,,,165.0000,identities = budget / (100 GiB/plot); delta=2
+sybil_yield,analytic,pospace_v3,3355443200,107374182400,100 GiB,10995116277760,10 TiB,,102,,,,,165.0000,identities = budget / (100 GiB/plot); delta=2
+sybil_yield,analytic,pospace_v3,3355443200,107374182400,100 GiB,109951162777600,100 TiB,,1024,,,,,165.0000,identities = budget / (100 GiB/plot); delta=2
+sybil_yield,analytic,pospace_v3,3355443200,107374182400,100 GiB,1125899906842624,1 PiB,,10485,,,,,165.0000,identities = budget / (100 GiB/plot); delta=2
+sybil_yield,analytic,pospace_v3,3355443200,107374182400,100 GiB,11258999068426240,10 PiB,,104857,,,,,165.0000,identities = budget / (100 GiB/plot); delta=2
+sybil_yield,analytic,pospace_v3,3355443200,107374182400,100 GiB,112589990684262400,100 PiB,,1048576,,,,,165.0000,identities = budget / (100 GiB/plot); delta=2
+chunk_control,real_ring,pospace_v3,3355443200,107374182400,100 GiB,0,0 B,32,0,0.0000,0.0000,0.0000,0.0000,,"MEASURED: 0 Sybils added to 32-node ring (random placement), 1000 served chunks"
+chunk_control,analytic,pospace_v3,3355443200,107374182400,100 GiB,107374182400,100 GiB,32,1,0.0303,0.0303,0.0882,0.0027,,m Sybils added to 32 honest; f=m/(m+N); i.i.d. analytic bounds
+chunk_control,real_ring,pospace_v3,3355443200,107374182400,100 GiB,107374182400,100 GiB,32,1,0.0303,0.0303,0.1700,0.0000,,"MEASURED: 1 Sybils added to 32-node ring (random placement), 1000 served chunks"
+chunk_control,analytic,pospace_v3,3355443200,107374182400,100 GiB,107374182400,100 GiB,1000,1,0.0010,0.0010,0.0030,2.99201e-06,,"m Sybils added to 1,000 honest; f=m/(m+N); i.i.d. analytic bounds"
+chunk_control,analytic,pospace_v3,3355443200,107374182400,100 GiB,107374182400,100 GiB,1000000,1,9.99999e-07,9.99999e-07,2.99999e-06,2.99999e-12,,"m Sybils added to 1,000,000 honest; f=m/(m+N); i.i.d. analytic bounds"
+chunk_control,real_ring,pospace_v3,3355443200,107374182400,100 GiB,214748364800,200 GiB,32,2,0.0588,0.0588,0.2150,0.0000,,"MEASURED: 2 Sybils added to 32-node ring (random placement), 1000 served chunks"
+chunk_control,real_ring,pospace_v3,3355443200,107374182400,100 GiB,322122547200,300 GiB,32,3,0.0857,0.0857,0.2890,0.0230,,"MEASURED: 3 Sybils added to 32-node ring (random placement), 1000 served chunks"
+chunk_control,real_ring,pospace_v3,3355443200,107374182400,100 GiB,644245094400,600 GiB,32,6,0.1579,0.1579,0.5070,0.0260,,"MEASURED: 6 Sybils added to 32-node ring (random placement), 1000 served chunks"
+chunk_control,real_ring,pospace_v3,3355443200,107374182400,100 GiB,1073741824000,1000 GiB,32,10,0.2381,0.2381,0.6350,0.1370,,"MEASURED: 10 Sybils added to 32-node ring (random placement), 1000 served chunks"
+chunk_control,analytic,pospace_v3,3355443200,107374182400,100 GiB,1099511627776,1 TiB,32,10,0.2381,0.2381,0.5577,0.1431,,m Sybils added to 32 honest; f=m/(m+N); i.i.d. analytic bounds
+chunk_control,analytic,pospace_v3,3355443200,107374182400,100 GiB,1099511627776,1 TiB,1000,10,0.0099,0.0099,0.0294,0.0003,,"m Sybils added to 1,000 honest; f=m/(m+N); i.i.d. analytic bounds"
+chunk_control,analytic,pospace_v3,3355443200,107374182400,100 GiB,1099511627776,1 TiB,1000000,10,9.9999e-06,9.9999e-06,2.99994e-05,2.99992e-10,,"m Sybils added to 1,000,000 honest; f=m/(m+N); i.i.d. analytic bounds"
+chunk_control,real_ring,pospace_v3,3355443200,107374182400,100 GiB,1717986918400,1.56 TiB,32,16,0.3333,0.3333,0.7290,0.2520,,"MEASURED: 16 Sybils added to 32-node ring (random placement), 1000 served chunks"
+chunk_control,real_ring,pospace_v3,3355443200,107374182400,100 GiB,2576980377600,2.34 TiB,32,24,0.4286,0.4286,0.8120,0.4050,,"MEASURED: 24 Sybils added to 32-node ring (random placement), 1000 served chunks"
+chunk_control,real_ring,pospace_v3,3355443200,107374182400,100 GiB,3328599654400,3.03 TiB,32,31,0.4921,0.4921,0.8580,0.4550,,"MEASURED: 31 Sybils added to 32-node ring (random placement), 1000 served chunks"
+chunk_control,analytic,pospace_v3,3355443200,107374182400,100 GiB,10995116277760,10 TiB,32,102,0.7612,0.7612,0.9864,0.8562,,m Sybils added to 32 honest; f=m/(m+N); i.i.d. analytic bounds
+chunk_control,analytic,pospace_v3,3355443200,107374182400,100 GiB,10995116277760,10 TiB,1000,102,0.0926,0.0926,0.2528,0.0241,,"m Sybils added to 1,000 honest; f=m/(m+N); i.i.d. analytic bounds"
+chunk_control,analytic,pospace_v3,3355443200,107374182400,100 GiB,10995116277760,10 TiB,1000000,102,0.0001,0.0001,0.0003,3.12035e-08,,"m Sybils added to 1,000,000 honest; f=m/(m+N); i.i.d. analytic bounds"
+chunk_control,analytic,pospace_v3,3355443200,107374182400,100 GiB,109951162777600,100 TiB,32,1024,0.9697,0.9697,1.0000,0.9973,,m Sybils added to 32 honest; f=m/(m+N); i.i.d. analytic bounds
+chunk_control,analytic,pospace_v3,3355443200,107374182400,100 GiB,109951162777600,100 TiB,1000,1024,0.5059,0.5059,0.8794,0.5089,,"m Sybils added to 1,000 honest; f=m/(m+N); i.i.d. analytic bounds"
+chunk_control,analytic,pospace_v3,3355443200,107374182400,100 GiB,109951162777600,100 TiB,1000000,1024,0.0010,0.0010,0.0031,3.13715e-06,,"m Sybils added to 1,000,000 honest; f=m/(m+N); i.i.d. analytic bounds"
+chunk_control,analytic,pospace_v3,3355443200,107374182400,100 GiB,1125899906842624,1 PiB,32,10485,0.9970,0.9970,1.0000,1.0000,,m Sybils added to 32 honest; f=m/(m+N); i.i.d. analytic bounds
+chunk_control,analytic,pospace_v3,3355443200,107374182400,100 GiB,1125899906842624,1 PiB,1000,10485,0.9129,0.9129,0.9993,0.9786,,"m Sybils added to 1,000 honest; f=m/(m+N); i.i.d. analytic bounds"
+chunk_control,analytic,pospace_v3,3355443200,107374182400,100 GiB,1125899906842624,1 PiB,1000000,10485,0.0104,0.0104,0.0308,0.0003,,"m Sybils added to 1,000,000 honest; f=m/(m+N); i.i.d. analytic bounds"
+chunk_control,analytic,pospace_v3,3355443200,107374182400,100 GiB,11258999068426240,10 PiB,32,104857,0.9997,0.9997,1.0000,1.0000,,m Sybils added to 32 honest; f=m/(m+N); i.i.d. analytic bounds
+chunk_control,analytic,pospace_v3,3355443200,107374182400,100 GiB,11258999068426240,10 PiB,1000,104857,0.9906,0.9906,1.0000,0.9997,,"m Sybils added to 1,000 honest; f=m/(m+N); i.i.d. analytic bounds"
+chunk_control,analytic,pospace_v3,3355443200,107374182400,100 GiB,11258999068426240,10 PiB,1000000,104857,0.0949,0.0949,0.2586,0.0253,,"m Sybils added to 1,000,000 honest; f=m/(m+N); i.i.d. analytic bounds"
+chunk_control,analytic,pospace_v3,3355443200,107374182400,100 GiB,112589990684262400,100 PiB,32,1048576,1.0000,1.0000,1.0000,1.0000,,m Sybils added to 32 honest; f=m/(m+N); i.i.d. analytic bounds
+chunk_control,analytic,pospace_v3,3355443200,107374182400,100 GiB,112589990684262400,100 PiB,1000,1048576,0.9990,0.9990,1.0000,1.0000,,"m Sybils added to 1,000 honest; f=m/(m+N); i.i.d. analytic bounds"
+chunk_control,analytic,pospace_v3,3355443200,107374182400,100 GiB,112589990684262400,100 PiB,1000000,1048576,0.5119,0.5119,0.8837,0.5178,,"m Sybils added to 1,000,000 honest; f=m/(m+N); i.i.d. analytic bounds"
+pospace_vs_free,analytic,none,,33,33 B/id,107374182400,100 GiB,1000000,3253763103,0.9997,0.9997,1.0000,1.0000,,"NO admission: identity=keypair (33 B) -> f->1, full control"
+pospace_vs_free,analytic,pospace_v3,3355443200,107374182400,100 GiB,107374182400,100 GiB,1000000,1,9.99999e-07,9.99999e-07,2.99999e-06,2.99999e-12,,"PoSpace v3: identity=100 GiB plot; cost x3,253,763,103 vs free"
+pospace_vs_free,analytic,none,,33,33 B/id,1099511627776,1 TiB,1000000,33318534175,1.0000,1.0000,1.0000,1.0000,,"NO admission: identity=keypair (33 B) -> f->1, full control"
+pospace_vs_free,analytic,pospace_v3,3355443200,107374182400,100 GiB,1099511627776,1 TiB,1000000,10,9.9999e-06,9.9999e-06,2.99994e-05,2.99992e-10,,"PoSpace v3: identity=100 GiB plot; cost x3,253,763,103 vs free"
+pospace_vs_free,analytic,none,,33,33 B/id,10995116277760,10 TiB,1000000,333185341750,1.0000,1.0000,1.0000,1.0000,,"NO admission: identity=keypair (33 B) -> f->1, full control"
+pospace_vs_free,analytic,pospace_v3,3355443200,107374182400,100 GiB,10995116277760,10 TiB,1000000,102,0.0001,0.0001,0.0003,3.12035e-08,,"PoSpace v3: identity=100 GiB plot; cost x3,253,763,103 vs free"
+pospace_vs_free,analytic,none,,33,33 B/id,109951162777600,100 TiB,1000000,3331853417503,1.0000,1.0000,1.0000,1.0000,,"NO admission: identity=keypair (33 B) -> f->1, full control"
+pospace_vs_free,analytic,pospace_v3,3355443200,107374182400,100 GiB,109951162777600,100 TiB,1000000,1024,0.0010,0.0010,0.0031,3.13715e-06,,"PoSpace v3: identity=100 GiB plot; cost x3,253,763,103 vs free"
+pospace_vs_free,analytic,none,,33,33 B/id,1125899906842624,1 PiB,1000000,34118178995231,1.0000,1.0000,1.0000,1.0000,,"NO admission: identity=keypair (33 B) -> f->1, full control"
+pospace_vs_free,analytic,pospace_v3,3355443200,107374182400,100 GiB,1125899906842624,1 PiB,1000000,10485,0.0104,0.0104,0.0308,0.0003,,"PoSpace v3: identity=100 GiB plot; cost x3,253,763,103 vs free"
+pospace_vs_free,analytic,none,,33,33 B/id,11258999068426240,10 PiB,1000000,341181789952310,1.0000,1.0000,1.0000,1.0000,,"NO admission: identity=keypair (33 B) -> f->1, full control"
+pospace_vs_free,analytic,pospace_v3,3355443200,107374182400,100 GiB,11258999068426240,10 PiB,1000000,104857,0.0949,0.0949,0.2586,0.0253,,"PoSpace v3: identity=100 GiB plot; cost x3,253,763,103 vs free"
+pospace_vs_free,analytic,none,,33,33 B/id,112589990684262400,100 PiB,1000000,3411817899523103,1.0000,1.0000,1.0000,1.0000,,"NO admission: identity=keypair (33 B) -> f->1, full control"
+pospace_vs_free,analytic,pospace_v3,3355443200,107374182400,100 GiB,112589990684262400,100 PiB,1000000,1048576,0.5119,0.5119,0.8837,0.5178,,"PoSpace v3: identity=100 GiB plot; cost x3,253,763,103 vs free"
+admission_demo,admission_inproc,pospace_v3,1024,32768,32 KiB,,,8,3,,,,,,admitted 3/3 Sybils; distinct_roots=True binding_ok=True -> one plot per identity (no amortisation); overall=ok
+control,real_ring,pospace_v3,,,,0,0 B,32,0,0.0000,0.0000,0.0000,0.0000,,zero budget -> 0 Sybils: structural capture over all served chunks
