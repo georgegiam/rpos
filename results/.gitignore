@@ -87,3 +87,12 @@ b4/
 # (fig_B5_sybil.png) and B5_NOTES.md are not *.csv, so already tracked. B5 is a microbenchmark (no
 # Docker) and writes the summary directly — there is no per-run raw snapshot dir.
 !B5_sybil.csv
+# Phase 7 B6 deliverables: malicious-ledger-proposer tables. B6_proposer.csv = in-process primary
+# (experiments/b6_proposer.py); B6_proposer_socket.csv = optional socket-testbed cross-check
+# (experiments/run_b6.sh + b6_driver.py). The figure (fig_B6_proposer.png) and B6_NOTES.md are not
+# *.csv, so already tracked.
+!B6_proposer.csv
+!B6_proposer_socket.csv
+# Phase 7 B6 raw per-run snapshots (experiments/run_b6.sh) — regenerable from the fixed seed
+# (CLAUDE.md §2), so not committed; the two summaries above are the committed deliverables.
+b6/

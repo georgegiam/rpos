@@ -1,0 +1,12 @@
+metric,source,block,f_pct,n_mal,realized_f_pct,proposals,committed,rejected,rejection_rate_pct,ideal_rejection_pct,chain_valid,target,target_forged_pct,target_share_pct,evicted,time_to_eviction_rounds,note
+rejection_vs_f,ring_inproc,,0,0,0.0000,40,40,0,0.0000,0.0000,,,,,,,honest control: VALID updates accepted (0 rejected = CORRECT)
+rejection_vs_f,ring_inproc,,10,3,9.3750,40,40,0,0.0000,100.0000,,,,,,,3 malicious proposer(s): forged updates accepted — no content validation (0 rejected = the bug); ideal (validating) protocol = 100%
+rejection_vs_f,ring_inproc,,20,6,18.7500,40,40,0,0.0000,100.0000,,,,,,,6 malicious proposer(s): forged updates accepted — no content validation (0 rejected = the bug); ideal (validating) protocol = 100%
+rejection_vs_f,ring_inproc,,30,10,31.2500,40,40,0,0.0000,100.0000,,,,,,,10 malicious proposer(s): forged updates accepted — no content validation (0 rejected = the bug); ideal (validating) protocol = 100%
+rejection_vs_f,ring_inproc,,40,13,40.6250,40,40,0,0.0000,100.0000,,,,,,,13 malicious proposer(s): forged updates accepted — no content validation (0 rejected = the bug); ideal (validating) protocol = 100%
+rejection_vs_f,ring_inproc,,50,16,50.0000,40,40,0,0.0000,100.0000,,,,,,,16 malicious proposer(s): forged updates accepted — no content validation (0 rejected = the bug); ideal (validating) protocol = 100%
+commit_acceptance,ring_inproc,random,,,,40,40,0,0.0000,,yes,,,,,,"40 forged updates: accepted 100.0%, every chunk's s=3 replicas store the forged value (poison_ok=True) and the hash chain still verifies -> committed, not rejected"
+commit_acceptance,ring_inproc,targeted,,,,,,,,,yes,google.com,100.0000,13.3592,,,"ONE non-replica proposer forges the popular chunk 'google.com': all s=3 replicas poisoned, chain valid -> corrupts ~13.4% of the Zipf answer stream at cost 1 (proposer need not own the chunk; grind cost -> B2)"
+eviction,ring_inproc,ledger_abuse,,,,10,10,,,,,,,,no,inf,"malicious proposer committed 10 forged updates, then PASSED 7 consecutive PoSpace challenges (valid plot) — fail_count=0, NEVER evicted: no path links ledger misbehaviour to _evict"
+eviction,ring_inproc,pospace_fail_control,,,,,,,,,,,,,yes,3,POSITIVE CONTROL: a corrupted-plot node IS evicted in 3 (=MAX_FAILS=3) rounds -> the eviction machinery works; it is simply not wired to ledger abuse
+control,ring_inproc,,0,0,0.0000,,,,0.0000,0.0000,,,,,no,,"honest proposer, valid updates: accepted (rejection 0 = correct) and not evicted -> the 0% rejection at f>0 is adversary-caused (no defense), not chord.py fragility"

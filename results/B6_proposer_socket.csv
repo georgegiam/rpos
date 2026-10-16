@@ -1,0 +1,3 @@
+source,mode,ring_nodes,proposals,committed,rejected,rejection_rate_pct,ledger_delta,expected_delta,note
+socket,valid,32,5,5,0,0.0000,15,15,honest control: valid updates committed
+socket,forged,32,5,5,0,0.0000,15,15,forged (invalid) updates committed by honest replicas -> rejection 0 over sockets
