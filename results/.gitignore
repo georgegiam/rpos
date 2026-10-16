@@ -64,3 +64,13 @@ b1/
 # figure (fig_B2_targeted.png) and B2_NOTES.md are not *.csv, so already tracked. B2 is a
 # microbenchmark (no Docker) and writes the summary directly — there is no per-run raw snapshot dir.
 !B2_targeted.csv
+# Phase 7 B3 deliverables: censorship tables. B3_censorship.csv = in-process primary
+# (experiments/b3_inproc.py); B3_censorship_socket.csv = optional socket-testbed cross-check
+# (experiments/b3_censorship.py). The figures (fig_B3_censorship*.png) and B3_NOTES.md are not
+# *.csv, so already tracked.
+!B3_censorship.csv
+!B3_censorship_socket.csv
+# Phase 7 B3 raw per-run snapshots (experiments/run_b3.sh: client.csv + placement.json + ring/)
+# — regenerable from the fixed seed (CLAUDE.md §2), so not committed; B3_censorship.csv is the
+# committed summary.
+b3/

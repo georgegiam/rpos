@@ -1,0 +1,8 @@
+source,block,f_pct,n_mal,realized_f_pct,runs,raw_dht_success_pct,raw_dht_success_sd,e2e_success_pct,e2e_success_sd,bound_censored_pct,structural_censored_pct,dht_pct,fallback_pct,target,target_raw_dht_success_pct,target_e2e_success_pct,note
+inproc,random,0,0,0.0000,3,100.0000,0.0000,100.0000,0.0000,0.0000,0.0000,100.0000,0.0000,,,,honest control
+inproc,random,10,3,9.3750,3,100.0000,0.0000,100.0000,0.0000,0.0824,0.0000,100.0000,0.0000,,,,
+inproc,random,20,6,18.7500,3,100.0000,0.0000,100.0000,0.0000,0.6592,0.0000,100.0000,0.0000,,,,
+inproc,random,30,10,31.2500,3,95.7333,7.3468,100.0000,0.0000,3.0518,2.9667,95.7333,4.2667,,,,
+inproc,random,40,13,40.6250,3,95.5333,7.5200,100.0000,0.0000,6.7047,2.9667,95.5333,4.4667,,,,
+inproc,random,50,16,50.0000,3,90.8500,7.7149,100.0000,0.0000,12.5000,8.4000,90.8500,9.1500,,,,
+inproc,targeted,9,3,9.3750,3,,0.0000,,0.0000,0.0824,,,,google.com,0.0000,100.0000,"full-replica capture: all s replicas of one popular chunk dropped (DHT denied, fallback recovers)"

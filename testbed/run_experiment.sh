@@ -44,6 +44,7 @@
 #   --replication S    nodes-mode chunk replication factor s [3]  (A4 sweep, issue #35)
 #   --succ-list-len L  nodes-mode Chord successor-list length [3] (raise for s>4)
 #   --malicious-indices "i,j,..."  nodes-mode: node indices to run malicious (B1, issue #42) [none]
+#   --malicious-mode M mode applied to --malicious-indices nodes: lie|drop|misroute|forge [lie]
 #   --keep-up          do NOT tear the stack down at the end
 #   -h, --help         show this help
 #
@@ -73,6 +74,9 @@ REPLICATION=3; SUCC_LIST_LEN=3
 # B1 (issue #42): comma list of node indices to run malicious (lie). Empty => all honest => every
 # non-B1 experiment byte-identical. Forwarded verbatim to gen_nodes_compose.py --malicious-indices.
 MALICIOUS_INDICES=""
+# B3 (issue #44): mode applied to the malicious indices. Defaults to "lie" so B1 and every other
+# caller is byte-identical (gen_nodes_compose.py's own default is also "lie"); B3 passes "drop".
+MALICIOUS_MODE="lie"
 
 # Print the leading comment banner (lines 2.. up to `set -euo`) as help text.
 usage() { awk 'NR>1 && /^set -euo/{exit} NR>1{sub(/^# ?/,"");print}' "$0"; }
@@ -149,7 +153,7 @@ run_nodes_mode() {
     python3 gen_nodes_compose.py --nodes "$N" --plot-n "$PLOT_N" --drg-indegree "$DRG_INDEGREE" \
         --seed "$SEED" --ring-port "$RING_PORT" --dns-port "$DNS_PORT" \
         --replication "$REPLICATION" --succ-list-len "$SUCC_LIST_LEN" \
-        --malicious-indices "$MALICIOUS_INDICES"
+        --malicious-indices "$MALICIOUS_INDICES" --malicious-mode "$MALICIOUS_MODE"
     local j
     for j in $(seq 0 $((N - 1))); do
         mkdir -p "$REPO_ROOT/results/ring/$j"
@@ -274,6 +278,7 @@ while [ $# -gt 0 ]; do
         --replication)    REPLICATION="$2"; shift 2 ;;
         --succ-list-len)  SUCC_LIST_LEN="$2"; shift 2 ;;
         --malicious-indices) MALICIOUS_INDICES="$2"; shift 2 ;;
+        --malicious-mode) MALICIOUS_MODE="$2"; shift 2 ;;
         --keep-up)        KEEP_UP=1; shift ;;
         -h|--help)        usage; exit 0 ;;
         *) echo "unknown argument: $1" >&2; echo "try: $0 --help" >&2; exit 2 ;;
