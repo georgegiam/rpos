@@ -96,7 +96,7 @@ teardown_ring() {
 }
 trap teardown_ring EXIT
 
-mw_for() { local q="$1" mw=$(( q * 5 )); [ "$mw" -lt 64 ] && mw=64; [ "$mw" -gt 1024 ] && mw=1024; echo "$mw"; }
+mw_for() { local q="$1"; local mw=$(( q * 5 )); [ "$mw" -lt 64 ] && mw=64; [ "$mw" -gt 1024 ] && mw=1024; echo "$mw"; }
 
 # bring the ring up (converge + warm @ WARM_QPS) and leave it up. idx = malicious indices (drop),
 # empty for the all-honest flood arms.

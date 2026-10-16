@@ -29,13 +29,25 @@ Two attack blocks:
 
 ### Headline finding
 
-**The DoS impact on honest clients is overwhelmingly `chord.py` load fragility, not an
-attack-specific protocol weakness.** Under a flood, honest p95 latency pegs the 5 s query timeout and
-the ring sheds ~22 % of its correct successors (health 100 % → ~78 %) — **but a matched volume of
-purely *legitimate* traffic does the same**, so the protocol-attributable delta (control success −
-attack success) is **only +1.7 to +4.4 pp** across the intensity sweep. The adversary's marginal
-advantage over honest load is small; the ring's vulnerability is that it has **no admission control
-or rate limiting on RPCs** and a maintenance loop that is fragile under *any* sustained load.
+**The DoS exposure is `chord.py`'s lack of load headroom, not an attack-specific protocol
+weakness** — established from both directions:
+
+- **Real transport (socket testbed), up to the tested intensity:** a cheap-RPC flood does **not**
+  meaningfully harm honest clients — success stays **≥98.7 %** and ring health **≥96.9 %** even at
+  400 offered RPC/s — and a *matched volume of legitimate query load is comparable or worse* (at
+  R=100 the honest control's p95 is 2423 ms vs the attack's 920 ms, because one real DNS query is
+  many wire RPCs while the flood is one `find_successor`). So there is **no attack-specific
+  amplification**: the protocol-attributable delta (control − attack success) is ≈0 (−2.2 to +0.2 pp).
+- **At the saturation cliff (in-process complement):** when load is pushed until it saturates the
+  shared medium, honest p95 pegs the 5 s timeout and the ring sheds ~22 % of its successors (health
+  100 % → ~78 %) — **but a matched volume of legitimate traffic does the same** (attack vs control
+  delta only +1.7 to +4.4 pp).
+
+Either way the adversary buys ~nothing over honest load; the vulnerability is that the ring has **no
+RPC admission control or rate limiting** and a maintenance loop fragile under *any* sustained load.
+Caveat (flagged): the Light socket sweep's flooder achieved only ~57–96 RPC/s (rate-paced over
+netem), **below** the ring's ~100–250 qps saturation (A2), so the socket run stays on the robust
+side of the cliff; the in-process complement is what exercises the cliff itself.
 
 ## Metric
 
@@ -75,22 +87,47 @@ The honest control (C=0) is the clean anchor: no flood → 100 % success, 27 ms 
 Any load (C≥50), honest **or** malicious, drives p95 to the 5 s timeout and ~7/32 nodes into
 successor-shed. The attack and control curves overlap (fig panels 1–3) — the finding.
 
-## Results — socket testbed (PRIMARY; run with Docker)
+## Results — socket testbed (PRIMARY; measured 2026-10-16, Light sweep, N=32, s=3, 1 run, 60 s)
 
-The headline real-transport numbers come from [`experiments/run_b7.sh`](../experiments/run_b7.sh)
-(N=32 Docker ring + netem, the issue's mandated emulation testbed) → `source=socket` rows in
-`B7_dos.csv`, with the flood block's intensity axis = **offered RPC rate R** and the blackhole block's
-axis = the f-grid. It was **coded and self-tested but not executed in this environment** (no Docker
-here — the `source=inproc` rows are the executed evidence). To collect:
+Real-transport numbers from [`experiments/run_b7.sh`](../experiments/run_b7.sh) (N=32 Docker ring +
+netem 5/50 ms, the issue's mandated emulation testbed) → `source=socket` rows in `B7_dos.csv`. The
+flood block's intensity axis is **offered RPC rate R**; the blackhole block's is the f-grid.
 
+**Flood block** — honest probe (10 qps into node 0) under a `find_successor` flood vs a matched
+legitimate query load:
+
+| R (offered RPC/s) | arm | success % | p95 ms | ring health % | achieved RPC/s | Δ (pp) |
+|---:|---|---:|---:|---:|---:|---:|
+| 0   | attack  | 99.3 | 933  | 100.0 | 0    | −0.3 (control) |
+| 0   | control | 99.0 | 976  | 100.0 | 0    | |
+| 100 | attack  | 99.7 | 920  | 100.0 | 57.5 | −2.2 |
+| 100 | control | 97.5 | 2423 | 100.0 | 100  | |
+| 400 | attack  | 98.7 | 1019 | 96.9  | 95.6 | +0.2 |
+| 400 | control | 98.8 | 655  | 100.0 | 400  | |
+
+The flood barely moves honest success (≥98.7 %) or ring health (≥96.9 %); the matched honest load is
+comparable or worse → **no attack amplification** (Δ ≈ 0). (The flooder achieved ≪ offered — netem
+rate-pacing — so this stays below saturation; see the headline caveat.)
+
+**Blackhole block** — f of the ring runs `drop`; systemic honest query stream:
+
+| f % | n_mal | e2e success % | raw-DHT % | p95 ms | note |
+|---:|---:|---:|---:|---:|---|
+| 0  | 0  | 99.0 | — | 979 | honest control |
+| 20 | 6  | 99.5 | 71.0 | 752 | fallback recovers |
+| 50 | 16 | 99.8 | 68.1 | 898 | fallback recovers |
+
+**End-to-end success stays ≥99 % through f=50 %** (the DNS-hierarchy fallback recovers every denied
+chunk); raw-DHT falls to ~68 % — redundancy (s=3) + fallback defeat the denial, exactly mirroring B3.
+(ring health in `B7_dos.csv` for the blackhole block counts the `drop` nodes themselves as orphans —
+they cannot answer `debug_state` — so it is not a pure maintenance-health signal there; it is for the
+all-honest flood block.)
+
+To extend to higher intensity / more runs:
 ```bash
-bash experiments/run_b7.sh            # flood sweep (attack+control) + blackhole f-grid
-python3 experiments/b7_dos.py         # merge socket + inproc -> results/B7_dos.csv + figure
+B7_INTENSITY="0 500 2000 8000" B7_RUNS=3 bash experiments/run_b7.sh   # push toward the cliff
+python3 experiments/b7_dos.py                                          # re-merge -> B7_dos.csv + fig
 ```
-
-Expectation to confirm (consistent with A2's ~100–250 qps saturation and the in-process result): the
-attack and control success/latency curves track each other with a modest attack premium, and the
-blackhole block shows redundancy (s=3 + fallback) holding e2e success high at low–moderate f.
 
 ## Method — the honest-control is the point
 
@@ -136,9 +173,13 @@ never masks the attack; default 300 keeps A1–A6 byte-identical).
 1. **The protocol delta is small and noisy** (±a few pp over 3 seeds); its *sign* even flips at some
    points. We do not over-claim a protocol-specific DoS — the honest reading is that the DoS is
    dominated by load fragility, which is the whole reason the honest-control is mandatory here.
-2. **In-process ≠ transport.** The in-process bus cannot reproduce TCP/connection/netem congestion;
-   its congestion model is event-loop saturation (a documented analog). The socket run is the
-   authoritative transport measurement, and is coded but not executed here (no Docker).
+2. **In-process ≠ transport, and the Light socket sweep stayed below saturation.** The in-process
+   bus cannot reproduce TCP/connection/netem congestion; its congestion model is event-loop
+   saturation (a documented analog) and it is what reaches the cliff. The socket run is the
+   authoritative transport measurement but the Light sweep's flooder achieved only ~57–96 RPC/s
+   (netem rate-pacing), below the ~100–250 qps saturation, so it measures the robust regime. A
+   heavier socket sweep (higher `B7_INTENSITY`, more workers) would locate the socket cliff; the
+   finding (fragility, not amplification) holds on both sides.
 3. **Modeling the flooders host-side** (not as in-ring nodes) is a deliberate choice for a
    zero-frozen-edit flood; the wire effect at the victims is identical, but the flooders do not
    themselves occupy ring positions (a colluding in-ring flood is a strict superset left as the
