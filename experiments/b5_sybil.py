@@ -89,6 +89,15 @@ TEST_PLOT_N = 1 << 10               # emulation test plot (node/pospace_admissio
 LABEL_BYTES = 32                    # one label = one SHA-256 digest
 PK_BYTES = 33                       # a "free" (no-PoSpace) identity artifact: one public key
 EMULATION_N = 32                    # emulation ceiling -> the measured structural anchor ring
+# Retention time-memory trade-off (phase1/FIX_A.md §3-4 + phase1/results/results_v3_retain.csv):
+# under the v3 DRG a cheater who discards labels must RECOMPUTE a large back-cone on challenge. The
+# δ=2 retention floor is ρ = 1/s = 0.5 of the LABELS (0.75 of storage incl. upper Merkle), and at
+# thesis N that recompute EXCEEDS the challenge timeout -> the cheater is rejected, so full retention
+# is the operative per-identity cost (the plot is effectively incompressible *within* one identity;
+# across identities it is non-amortisable because id=H(pk) binds a distinct plot to each pk). We still
+# emit a worst-case `pospace_v3_retention` sensitivity at ρ_min in case the thesis-scale extrapolation
+# is loose or a parallel attacker is assumed (FIX_A's open caveat) -- it ~2x's the adversary's yield.
+RETENTION_RHO_MIN = 0.5             # δ=2 labels-retention floor (FIX_A §3-4); worst-case sensitivity
 DEFAULT_HONEST = [32, 1_000, 1_000_000]            # honest ring sizes for the analytic control curves
 FREE_REF_HONEST = 1_000_000                        # internet-ish reference ring for pospace_vs_free
 # measured anchor: m Sybils ADDED to a 32-node honest ring (random _pk_for placement, node 0 honest)
@@ -99,6 +108,8 @@ DEFAULT_BUDGETS = ["100GiB", "1TiB", "10TiB", "100TiB", "1PiB", "10PiB", "100PiB
 DEMO_HONEST_N = 8                   # in-process honest PoSpace ring (the A7 ring)
 DEMO_SYBILS = 3                     # distinct Sybils to admit in the demo
 DEMO_PLOT_N = 1 << 10              # test plot (cheap; plot COST is quantified by A7)
+DEMO_HONEST_PLOT_N = 1 << 12       # ring parameterised with a LARGER plot, to probe min-plot-size
+DEMO_SMALL_PLOT_N = 1 << 10        # a Sybil's under-sized plot (should be rejected, but ISN'T)
 
 # Native single-core plot-time floor @ 100 GiB, by DRG in-degree delta (phase1/FIX_A.md §4,
 # "Plotting @ 100 GiB"): measured native floor. delta=2 is the node default -> the headline.
@@ -177,7 +188,22 @@ def block1_sybil_yield(budgets: list[int], n_plot: int, delta: int) -> list[dict
             "storage_budget_bytes": b, "storage_budget_h": human_bytes(b), "N_honest": "",
             "identities": m, "f": "", "control_primary": "", "control_forge_1ofs": "",
             "control_majority": "", "plot_seconds_native": pnat,
-            "note": f"identities = budget / ({human_bytes(pb)}/plot); delta={delta}",
+            "note": f"identities = budget / ({human_bytes(pb)}/plot); delta={delta}; "
+                    f"CONDITIONAL on a minimum-plot-size check (see admission_demo min-plot-size gate)",
+        })
+        # retention worst-case sensitivity: IF the thesis-scale back-cone extrapolation is loose or a
+        # parallel attacker is assumed (FIX_A open caveat), a cheater may retain only rho_min of the
+        # labels and recompute -> ~1/rho_min x more identities. Reported so the floor is not overstated.
+        rho_pb = int(pb * RETENTION_RHO_MIN)
+        rows.append({
+            "metric": "sybil_yield", "source": "analytic", "scheme": "pospace_v3_retention",
+            "plot_n": n_plot, "plot_bytes": rho_pb, "plot_h": human_bytes(rho_pb),
+            "storage_budget_bytes": b, "storage_budget_h": human_bytes(b), "N_honest": "",
+            "identities": b // rho_pb if rho_pb else 0, "f": "", "control_primary": "",
+            "control_forge_1ofs": "", "control_majority": "", "plot_seconds_native": pnat,
+            "note": f"WORST-CASE: cheater retains rho_min={RETENTION_RHO_MIN} of labels (FIX_A δ=2 "
+                    f"retention floor) -> ~{1/RETENTION_RHO_MIN:.0f}x yield; v3 DEFEATS this at thesis "
+                    f"N (recompute > timeout), so full retention is operative -- sensitivity only",
         })
     # one TEST-plot row: at PLOT_N=1024 (32 KiB) a trivial budget mints astronomically many ids ->
     # the emulation scale is deliberately NOT the security scale (flag, don't hide).
@@ -213,7 +239,8 @@ def block2_chunk_control(budgets: list[int], n_plot: int, honest_sizes: list[int
                 "storage_budget_bytes": b, "storage_budget_h": human_bytes(b), "N_honest": nh,
                 "identities": m, "f": f, "control_primary": pr, "control_forge_1ofs": fo,
                 "control_majority": ma, "plot_seconds_native": "",
-                "note": f"m Sybils added to {nh:,} honest; f=m/(m+N); i.i.d. analytic bounds",
+                "note": f"m Sybils added to {nh:,} honest; f=m/(m+N); i.i.d. RANDOM-placement bounds "
+                        f"(weak-adversary LOWER bound; targeted placement -> B2, see targeted row)",
             })
     # MEASURED anchor: m Sybils ADDED to the real 32-node emulation ring (indices 32..32+m-1 are the
     # Sybils, _pk_for placement = RANDOM positions; node 0 stays honest). structural_capture_fraction
@@ -235,8 +262,39 @@ def block2_chunk_control(budgets: list[int], n_plot: int, honest_sizes: list[int
             "storage_budget_h": human_bytes(m * plot_bytes(n_plot)), "N_honest": EMULATION_N,
             "identities": m, "f": f, "control_primary": primary, "control_forge_1ofs": forge,
             "control_majority": majority, "plot_seconds_native": "",
-            "note": f"MEASURED: {m} Sybils added to 32-node ring (random placement), "
-                    f"{len(domains)} served chunks",
+            "note": f"MEASURED (RANDOM placement, weak-adversary lower bound): {m} Sybils added to "
+                    f"32-node ring, {len(domains)} served chunks; targeted -> B2",
+        })
+    # TARGETED upper bound (cross-ref B2): grinding (id=H(pk), unsalted, attacker-chosen pk) lets a
+    # Sybil co-locate on a CHOSEN chunk's consecutive replica slots, so a CONSTANT capture_threshold(s)
+    # plots capture that chunk's majority regardless of budget/popularity -- control of the chosen
+    # chunk = 1.0. This is the strong-adversary complement to the random curves above (B2 measures the
+    # grind cost; here we record the placement outcome for B5's budget framing).
+    try:
+        thresh = b1.capture_threshold(s)
+        mal_idx, target = b1.targeted_indices(EMULATION_N, s, thresh, seed)
+        ring, id2idx = b1.build_ring(EMULATION_N, s)
+        reps = b1.replica_indices(target, ring, id2idx, s)
+        captured = len(set(reps) & set(mal_idx)) >= thresh
+        rows.append({
+            "metric": "chunk_control", "source": "real_ring", "scheme": "pospace_v3_targeted",
+            "plot_n": n_plot, "plot_bytes": plot_bytes(n_plot), "plot_h": human_bytes(plot_bytes(n_plot)),
+            "storage_budget_bytes": thresh * plot_bytes(n_plot),
+            "storage_budget_h": human_bytes(thresh * plot_bytes(n_plot)), "N_honest": EMULATION_N,
+            "identities": thresh, "f": thresh / (EMULATION_N + thresh),
+            "control_primary": "", "control_forge_1ofs": 1.0 if captured else 0.0,
+            "control_majority": 1.0 if captured else 0.0, "plot_seconds_native": "",
+            "note": f"TARGETED (strong adversary, grinding -> B2): {thresh} plots capture a CHOSEN "
+                    f"chunk's majority (target={target!r}) regardless of budget; control of that "
+                    f"chunk = 1.0 -- constant cost, independent of N",
+        })
+    except Exception as e:                                           # pragma: no cover (host-safe)
+        rows.append({
+            "metric": "chunk_control", "source": "real_ring", "scheme": "pospace_v3_targeted",
+            "plot_n": n_plot, "plot_bytes": "", "plot_h": "", "storage_budget_bytes": "",
+            "storage_budget_h": "", "N_honest": EMULATION_N, "identities": "", "f": "",
+            "control_primary": "", "control_forge_1ofs": "", "control_majority": "",
+            "plot_seconds_native": "", "note": f"targeted anchor unavailable ({type(e).__name__}) -> B2",
         })
     return rows
 
@@ -268,37 +326,48 @@ def block3_pospace_vs_free(budgets: list[int], n_plot: int, n_honest: int, s: in
             "storage_budget_bytes": b, "storage_budget_h": human_bytes(b), "N_honest": n_honest,
             "identities": m_ps, "f": m_ps / (m_ps + n_honest), "control_primary": pr_p,
             "control_forge_1ofs": fo_p, "control_majority": ma_p, "plot_seconds_native": "",
-            "note": f"PoSpace v3: identity={human_bytes(pb)} plot; cost x{pb // PK_BYTES:,} vs free",
+            "note": f"PoSpace v3: identity={human_bytes(pb)} plot; cost x{pb // PK_BYTES:,} vs free "
+                    f"(CONDITIONAL on a minimum-plot-size check -- admission_demo min-plot-size gate)",
         })
     return rows
 
 
 # =============================================================================================
-# Block 4 -- in-process admission demo: k distinct Sybils each need their OWN plot (no amortisation).
+# Block 4 -- in-process admission PROBE on a real PoSpace ring (A7 pattern). Three measured gates,
+# reported as PASS (property holds) / FAIL (gap found) -- NOT as a self-congratulatory "it works":
+#   (1) no-amortisation   -- k distinct Sybils each build their OWN plot (k distinct roots).      [expect PASS]
+#   (2) pk<->id binding    -- a Sybil advertising ANOTHER identity's commitment is REJECTED.       [expect PASS]
+#   (3) min-plot-size      -- a Sybil declaring an UNDER-SIZED plot is admitted into a larger ring. [expect FAIL]
+# Gate (3) is the measured basis for the CONDITIONAL in the cost rows: the reference admission
+# (node/pospace_admission.py, FROZEN) trusts the prover's self-declared `n`/`delta` and enforces no
+# minimum, so floor(budget / 32*N_plot) holds only once a minimum-plot-size check is added. (Flagged,
+# not asserted -- CLAUDE.md §2.) Lazily imports the node stack; returns a skipped row if unavailable.
 # =============================================================================================
-def block4_admission_demo(seed: int) -> list[dict]:
-    """Admit k distinct Sybils on a real in-process PoSpace ring (A7 pattern) and show each built its
-    OWN plot (k distinct commitment roots) and the pk<->id binding blocks plot reuse. Lazily imports
-    the node stack (dnspython): returns a skipped row if it is unavailable, so the cost analysis runs
-    anywhere."""
-    def _skip(reason: str) -> list[dict]:
-        return [{
-            "metric": "admission_demo", "source": "admission_inproc", "scheme": "pospace_v3",
-            "plot_n": DEMO_PLOT_N, "plot_bytes": plot_bytes(DEMO_PLOT_N),
-            "plot_h": human_bytes(plot_bytes(DEMO_PLOT_N)), "storage_budget_bytes": "",
-            "storage_budget_h": "", "N_honest": DEMO_HONEST_N, "identities": "", "f": "",
-            "control_primary": "", "control_forge_1ofs": "", "control_majority": "",
-            "plot_seconds_native": "", "note": f"in-process demo skipped ({reason})",
-        }]
+def _demo_row(result: str, note: str, admitted="", plot_n=DEMO_PLOT_N) -> dict:
+    return {
+        "metric": "admission_demo", "source": "admission_inproc", "scheme": "pospace_v3",
+        "plot_n": plot_n, "plot_bytes": plot_bytes(plot_n) if isinstance(plot_n, int) else "",
+        "plot_h": human_bytes(plot_bytes(plot_n)) if isinstance(plot_n, int) else "",
+        "storage_budget_bytes": "", "storage_budget_h": "", "N_honest": DEMO_HONEST_N,
+        "identities": admitted, "f": "", "control_primary": "", "control_forge_1ofs": "",
+        "control_majority": "", "plot_seconds_native": "", "result": result, "note": note,
+    }
 
+
+def block4_admission_demo(seed: int) -> list[dict]:
+    """Probe the real in-process admission (positive + two adversarial negatives). Each sub-case
+    returns one row with a machine-readable `result` column (pass/fail/skipped)."""
     try:
         import asyncio
         from node.net import Network
         from node.pospace_admission import PoSpaceNode
         from node.ids import node_id_from_pk as _nid
         from node.run_node import _pk_for
-    except Exception as e:                                           # dnspython / env missing
-        return _skip(f"import failed: {type(e).__name__}; run under the 3.11 env with dnspython")
+    except (ImportError, ModuleNotFoundError) as e:                  # env missing -> skip cleanly
+        return [_demo_row("skipped",
+                          f"in-process demo skipped (import failed: {type(e).__name__}; "
+                          f"run under the 3.11 env with dnspython)")]
+    # any OTHER exception is a real failure -> let it propagate (do NOT masquerade as skipped).
 
     async def _converge(nodes, rounds: int) -> None:
         for _ in range(rounds):
@@ -313,56 +382,85 @@ def block4_admission_demo(seed: int) -> list[dict]:
 
     async def _run() -> dict:
         net = Network()
-        nodes = [PoSpaceNode(_pk_for(j), net, plot_n=DEMO_PLOT_N, seed=seed)
+        # Honest ring parameterised with a LARGER plot, so gate (3) can probe for a floor.
+        nodes = [PoSpaceNode(_pk_for(j), net, plot_n=DEMO_HONEST_PLOT_N, seed=seed)
                  for j in range(DEMO_HONEST_N)]
         await nodes[0].create()
         for nd in nodes[1:]:
             await nd.join(nodes[0].node_id)
             await _converge(nodes, rounds=6)
 
-        # Admit k distinct Sybils, each with its OWN pk -> its OWN plot.
+        # (1) no-amortisation: k distinct Sybils, each its OWN pk -> OWN plot (matching the ring plot).
         sybils, roots, ids, admitted = [], [], [], 0
         for k in range(DEMO_SYBILS):
             pk = b"b5-sybil-" + k.to_bytes(4, "big") + b"\x00" * 20
-            syb = PoSpaceNode(pk, net, plot_n=DEMO_PLOT_N, seed=seed)
-            ok = True
+            syb = PoSpaceNode(pk, net, plot_n=DEMO_HONEST_PLOT_N, seed=seed)
             try:
-                await syb.join(nodes[0].node_id)        # real gated admission (build plot + challenge)
-            except Exception:
-                ok = False
-            await _converge(nodes + sybils + [syb], rounds=4)
-            if ok:
+                await syb.join(nodes[0].node_id)
                 admitted += 1
+            except Exception:
+                pass
+            await _converge(nodes + sybils + [syb], rounds=4)
             sybils.append(syb)
             roots.append(syb.plot_root)
             ids.append(syb.node_id)
-
-        # No-amortisation / binding checks: distinct pks -> distinct roots -> distinct ids; and the
-        # id of each Sybil is exactly node_id_from_pk(pk) (so one plot's pk cannot masquerade as another
-        # id -- the challenger rejects node_id_from_pk(pk) != peer_id).
         distinct_roots = len({r for r in roots if r is not None}) == DEMO_SYBILS
-        distinct_ids = len(set(ids)) == DEMO_SYBILS
-        binding_ok = all(syb.node_id == _nid(syb.pk) for syb in sybils)
+        amort_pass = (admitted == DEMO_SYBILS and distinct_roots
+                      and len(set(ids)) == DEMO_SYBILS)
+
+        # (2) pk<->id binding: a Sybil whose commitment handler advertises node 0's (pk, root) must be
+        # REJECTED by the challenger -- node_id_from_pk(node0.pk) != sybil_id. This exercises the REAL
+        # gate (challenge_peer's verdict), not the tautology node_id == node_id_from_pk(pk).
+        spoof = PoSpaceNode(b"b5-spoof" + b"\x00" * 24, net, plot_n=DEMO_HONEST_PLOT_N, seed=seed)
+        spoof._build_plot()
+        n0 = nodes[0]
+
+        async def _spoofed_commitment(src):                          # advertise node 0's plot
+            return (n0.pk, n0.plot_root, n0.plot_n, n0.drg_indegree)
+        spoof.handlers["pospace_commitment"] = _spoofed_commitment
+        spoof.start()
+        binding_rejected = (await n0.challenge_peer(spoof.node_id)) is False
+        spoof.stop()
+
+        # (3) min-plot-size: a Sybil declaring an UNDER-SIZED plot (DEMO_SMALL_PLOT_N) tries to join a
+        # ring whose honest nodes use DEMO_HONEST_PLOT_N. The frozen challenger never checks n against
+        # the ring, so it is (incorrectly) ADMITTED -> a measured gap.
+        small = PoSpaceNode(b"b5-undersized" + b"\x00" * 19, net,
+                            plot_n=DEMO_SMALL_PLOT_N, seed=seed)
+        small_admitted = True
+        try:
+            await small.join(nodes[0].node_id)
+        except Exception:
+            small_admitted = False
+        await _converge(nodes + sybils + [small], rounds=4)
+        small.stop()
 
         for nd in nodes + sybils:
             nd.stop()
-        return {"admitted": admitted, "distinct_roots": distinct_roots,
-                "distinct_ids": distinct_ids, "binding_ok": binding_ok}
+        return {"admitted": admitted, "distinct_roots": distinct_roots, "amort_pass": amort_pass,
+                "binding_rejected": binding_rejected, "small_admitted": small_admitted}
 
     res = asyncio.run(_run())
-    ok = (res["admitted"] == DEMO_SYBILS and res["distinct_roots"]
-          and res["distinct_ids"] and res["binding_ok"])
-    return [{
-        "metric": "admission_demo", "source": "admission_inproc", "scheme": "pospace_v3",
-        "plot_n": DEMO_PLOT_N, "plot_bytes": plot_bytes(DEMO_PLOT_N),
-        "plot_h": human_bytes(plot_bytes(DEMO_PLOT_N)), "storage_budget_bytes": "",
-        "storage_budget_h": "", "N_honest": DEMO_HONEST_N, "identities": res["admitted"],
-        "f": "", "control_primary": "", "control_forge_1ofs": "", "control_majority": "",
-        "plot_seconds_native": "",
-        "note": f"admitted {res['admitted']}/{DEMO_SYBILS} Sybils; distinct_roots="
-                f"{res['distinct_roots']} binding_ok={res['binding_ok']} -> one plot per identity "
-                f"(no amortisation); overall={'ok' if ok else 'OFF'}",
-    }]
+    rows = [
+        _demo_row(
+            "pass" if res["amort_pass"] else "fail",
+            f"no-amortisation: admitted {res['admitted']}/{DEMO_SYBILS} distinct Sybils, "
+            f"distinct_roots={res['distinct_roots']} -> one plot per identity (k ids need k plots)",
+            admitted=res["admitted"], plot_n=DEMO_HONEST_PLOT_N),
+        _demo_row(
+            "pass" if res["binding_rejected"] else "fail",
+            "pk<->id binding: a Sybil advertising another identity's (pk,root) is REJECTED by "
+            "challenge_peer (node_id_from_pk(pk) != peer_id) -> plot reuse across ids is blocked",
+            plot_n=DEMO_HONEST_PLOT_N),
+        _demo_row(
+            "fail" if res["small_admitted"] else "pass",
+            f"min-plot-size: an UNDER-SIZED Sybil (plot_n={DEMO_SMALL_PLOT_N}) is "
+            f"{'ADMITTED into' if res['small_admitted'] else 'rejected by'} a "
+            f"plot_n={DEMO_HONEST_PLOT_N} ring -- the frozen admission trusts self-declared n/delta "
+            f"with no minimum; so floor(budget/32*N_plot) is CONDITIONAL on an unimplemented check",
+            plot_n=DEMO_SMALL_PLOT_N),
+    ]
+    return rows
 
 
 # =============================================================================================
@@ -385,7 +483,7 @@ def control_row(n: int, s: int) -> list[dict]:
 FIELDS = ["metric", "source", "scheme", "plot_n", "plot_bytes", "plot_h",
           "storage_budget_bytes", "storage_budget_h", "N_honest", "identities", "f",
           "control_primary", "control_forge_1ofs", "control_majority", "plot_seconds_native",
-          "note"]
+          "result", "note"]
 
 _METRIC_ORDER = {"sybil_yield": 0, "chunk_control": 1, "pospace_vs_free": 2,
                  "admission_demo": 3, "control": 4}
@@ -479,16 +577,17 @@ def make_plot(rows: list[dict]) -> None:
             ax.plot(an_budgets, ser, marker="o", ms=4, lw=1.7, color=NHC[nh],
                     label=f"N_honest = {nh:,}")
     # measured N=32 structural anchor (budget = m * 100 GiB)
-    anchor = [r for r in cc if r["source"] == "real_ring"]
+    anchor = [r for r in cc if r["source"] == "real_ring" and r["scheme"] == "pospace_v3"]
     axb = [r["storage_budget_bytes"] for r in anchor if r["storage_budget_bytes"]]
     axy = [r["control_forge_1ofs"] for r in anchor if r["storage_budget_bytes"]]
     if axb:
         ax.plot(axb, axy, marker="D", ms=6, lw=0, color=ANCHORC,
-                label="measured N=32 (structural)")
+                label="measured N=32 (random, structural)")
     ax.set_xscale("log")
-    ax.set_xlabel("storage budget (bytes)"); ax.set_ylabel("chunk space controlled (forge, >=1-of-s)")
+    ax.set_xlabel("storage budget (bytes)")
+    ax.set_ylabel("chunk space controlled (forge, >=1-of-s)")
     ax.set_ylim(-0.03, 1.03)
-    ax.set_title("Chunk control vs budget: bigger ring needs more budget")
+    ax.set_title("Chunk control vs budget (random placement = lower bound)")
     ax.legend(frameon=False, fontsize=8, loc="upper left")
 
     fig.suptitle("B5 — Sybil vs PoSpace admission: one identity = one ~100 GiB plot; "
@@ -502,7 +601,7 @@ def make_plot(rows: list[dict]) -> None:
 # =============================================================================================
 # Self-test -- deterministic, no Docker (the plan's verification step).
 # =============================================================================================
-def _self_test() -> int:
+def _self_test(require_demo: bool = False) -> int:
     ok = True
     s = DEFAULT_S
     pb = plot_bytes(REAL_PLOT_N)
@@ -566,14 +665,27 @@ def _self_test() -> int:
     ok &= f_ok
     print(f"  (f) zero-budget control capture={f_frac:.4f}  [{'ok' if f_ok else 'OFF'}]")
 
-    # (g) in-process admission demo (skips cleanly if dnspython absent).
-    demo = block4_admission_demo(SEED)[0]
-    if "skipped" in demo["note"]:
-        print(f"  (g) admission demo SKIPPED ({demo['note'].split('(', 1)[-1].rstrip(')')})")
+    # (g) in-process admission probe: no-amortisation (pass), binding (pass), min-plot-size (expected
+    # FAIL -- a MEASURED gap in the frozen admission). The gate 'result' columns are authoritative;
+    # a real error no longer masquerades as 'skipped' (narrowed import guard in block4). A skip fails
+    # the self-test only under --require-demo.
+    demo_rows = block4_admission_demo(SEED)
+    if demo_rows and demo_rows[0]["result"] == "skipped":
+        print(f"  (g) admission probe SKIPPED "
+              f"({demo_rows[0]['note'].split('(', 1)[-1].rstrip(')')})")
+        if require_demo:
+            ok = False
+            print("      --require-demo set -> SKIP counts as FAIL")
     else:
-        g_ok = "overall=ok" in demo["note"]
+        by = {r["note"].split(":", 1)[0]: r["result"] for r in demo_rows}
+        # no-amortisation and binding MUST pass; min-plot-size is an EXPECTED fail (documents the gap).
+        g_ok = (by.get("no-amortisation") == "pass" and by.get("pk<->id binding") == "pass"
+                and by.get("min-plot-size") == "fail")
         ok &= g_ok
-        print(f"  (g) {demo['note']}  [{'ok' if g_ok else 'OFF'}]")
+        for r in demo_rows:
+            print(f"  (g) [{r['result']:>4}] {r['note'][:96]}")
+        print(f"      no-amortisation+binding PASS, min-plot-size FAIL-as-expected  "
+              f"[{'ok' if g_ok else 'OFF'}]")
 
     print("[self-test]", "PASS" if ok else "FAIL")
     return 0 if ok else 1
@@ -585,6 +697,8 @@ def main() -> int:
     ap.add_argument("--no-plot", action="store_true", help="skip the figure")
     ap.add_argument("--no-demo", action="store_true", help="skip the in-process admission demo")
     ap.add_argument("--self-test", action="store_true", help="deterministic checks, no Docker")
+    ap.add_argument("--require-demo", action="store_true",
+                    help="treat a skipped in-process admission probe as a failure (CI/security gate)")
     ap.add_argument("--budgets", default=",".join(DEFAULT_BUDGETS),
                     help="comma list of storage budgets (e.g. 100GiB,1TiB,1PiB)")
     ap.add_argument("--n-plot", type=int, default=REAL_PLOT_N,
@@ -597,7 +711,7 @@ def main() -> int:
     args = ap.parse_args()
 
     if args.self_test:
-        return _self_test()
+        return _self_test(require_demo=args.require_demo)
 
     budgets = [parse_size(x) for x in args.budgets.split(",") if x]
     honest_sizes = [int(x) for x in args.honest_sizes.split(",") if x]
@@ -625,9 +739,14 @@ def main() -> int:
             lo, hi = sub[0], sub[-1]
             print(f"  N_honest={nh:>9,}: budget {lo['storage_budget_h']}->{hi['storage_budget_h']}  "
                   f"forge-control {lo['control_forge_1ofs']:.4f}->{hi['control_forge_1ofs']:.4f}")
-    anchor = [r for r in c_rows if r["source"] == "real_ring"]
-    print(f"  MEASURED N=32 anchor: m={anchor[1]['identities']} forge={anchor[1]['control_forge_1ofs']:.4f} "
-          f"... m={anchor[-1]['identities']} forge={anchor[-1]['control_forge_1ofs']:.4f}")
+    anchor = [r for r in c_rows if r["source"] == "real_ring" and r["scheme"] == "pospace_v3"]
+    print(f"  MEASURED N=32 anchor (random, lower bound): m={anchor[1]['identities']} "
+          f"forge={anchor[1]['control_forge_1ofs']:.4f} ... m={anchor[-1]['identities']} "
+          f"forge={anchor[-1]['control_forge_1ofs']:.4f}")
+    tgt = next((r for r in c_rows if r["scheme"] == "pospace_v3_targeted"), None)
+    if tgt and tgt["identities"] != "":
+        print(f"  TARGETED (strong adversary, -> B2): {tgt['identities']} plots capture a chosen "
+              f"chunk's majority (control 1.0), constant in budget")
 
     print("\n== Block 3: PoSpace vs free (the cost PoSpace imposes) ==")
     v_rows = block3_pospace_vs_free(budgets, n_plot, FREE_REF_HONEST, DEFAULT_S)
@@ -640,11 +759,25 @@ def main() -> int:
               f"{fr['control_forge_1ofs']:.3f}  |  pospace: ids={ps['identities']:,} ctrl="
               f"{ps['control_forge_1ofs']:.4f}")
 
+    demo_failed = False
     if not args.no_demo:
-        print("\n== Block 4: in-process admission demo (k Sybils, one plot each) ==")
+        print("\n== Block 4: in-process admission probe (no-amortisation / binding / min-plot-size) ==")
         demo_rows = block4_admission_demo(args.seed)
         rows += demo_rows
-        print(f"  {demo_rows[0]['note']}")
+        for r in demo_rows:
+            print(f"  [{r['result']:>7}] {r['note']}")
+        if demo_rows and demo_rows[0]["result"] == "skipped":
+            if args.require_demo:
+                demo_failed = True
+        else:
+            # no-amortisation + binding MUST pass; min-plot-size is an EXPECTED fail (documented gap).
+            by = {r["note"].split(":", 1)[0]: r["result"] for r in demo_rows}
+            if not (by.get("no-amortisation") == "pass"
+                    and by.get("pk<->id binding") == "pass"
+                    and by.get("min-plot-size") == "fail"):
+                demo_failed = True
+                print("  WARNING: admission probe did not match expected verdicts "
+                      "(no-amortisation/binding PASS, min-plot-size FAIL)")
 
     rows += control_row(EMULATION_N, DEFAULT_S)
     print(f"\n== Control: zero-budget structural capture = {rows[-1]['control_forge_1ofs']:.4f} ==")
@@ -652,7 +785,7 @@ def main() -> int:
     write_csv(rows)
     if not args.no_plot:
         make_plot(rows)
-    return 0
+    return 1 if demo_failed else 0
 
 
 if __name__ == "__main__":
