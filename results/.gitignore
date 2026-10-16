@@ -74,3 +74,12 @@ b1/
 # — regenerable from the fixed seed (CLAUDE.md §2), so not committed; B3_censorship.csv is the
 # committed summary.
 b3/
+# Phase 7 B4 deliverables: routing/eclipse tables. B4_eclipse.csv = in-process primary
+# (experiments/b4_inproc.py); B4_eclipse_socket.csv = optional socket-testbed cross-check
+# (experiments/b4_eclipse.py). The figures (fig_B4_eclipse*.png) and B4_NOTES.md are not *.csv,
+# so already tracked.
+!B4_eclipse.csv
+!B4_eclipse_socket.csv
+# Phase 7 B4 raw per-run snapshots (experiments/run_b4.sh: client.csv + placement.json + ring/)
+# — regenerable from the fixed seed (CLAUDE.md §2), so not committed; B4_eclipse.csv is the summary.
+b4/
