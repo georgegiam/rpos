@@ -111,3 +111,7 @@ b7/
 # The figure (fig_C1_retention.png) and C1_NOTES.md are not *.csv, so already tracked. C1 is a
 # microbenchmark (no Docker) and writes the summary directly — there is no per-run raw snapshot dir.
 !C1_retention_attack.csv
+# Phase 8 C2 deliverable: δ-under-network-jitter table (experiments/c2_delta_jitter.py). The figure
+# (fig_C2_roc.png) and C2_NOTES.md are not *.csv, so already tracked. C2 is a microbenchmark (no
+# Docker) and writes the summary directly — there is no per-run raw snapshot dir.
+!C2_delta_jitter.csv
