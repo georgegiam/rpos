@@ -107,3 +107,7 @@ b6/
 # b7_inproc.py) — regenerable from the fixed seed (CLAUDE.md §2), so not committed; B7_dos.csv is
 # the committed summary.
 b7/
+# Phase 8 C1 deliverable: retention-attack time-space trade-off table (experiments/c1_retention.py).
+# The figure (fig_C1_retention.png) and C1_NOTES.md are not *.csv, so already tracked. C1 is a
+# microbenchmark (no Docker) and writes the summary directly — there is no per-run raw snapshot dir.
+!C1_retention_attack.csv
