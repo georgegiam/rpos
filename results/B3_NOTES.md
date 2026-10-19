@@ -98,13 +98,20 @@ transport, not the protocol** — the real socket testbed marks drop peers down 
 (exactly as it heals around churn in A6). We therefore isolate the actual censorship surface (the
 s-replica storage read + vote) and take realistic latency from the socket testbed.
 
-**Socket-testbed cross-check** (`experiments/run_b3.sh` + `experiments/b3_censorship.py`): the real
-32-container ring with netem, cold-path (`UPSTREAM_TTL=0`), measuring raw-DHT + e2e + **latency** from
-each node's `queries.csv` and the client CSV. Its **f=0/f=10 points already anchored this model**
-(f=0 raw-DHT 72.6% ≈ A6's ∞ anchor 76.3% once node-0 caching is accounted for; f=10 70.8%,
-e2e ≥98%, p95 918→1040 ms). The socket harness is slow (~4 min/bring-up) and, in this environment,
-intermittently stalls during warm-up — which is **why the in-process ring is the primary, robust
-deliverable**; the socket run is the optional realistic-network cross-check.
+**Socket-testbed cross-check** (`experiments/run_b3.sh` + `experiments/b3_censorship.py` →
+[`B3_censorship_socket.csv`](B3_censorship_socket.csv)): the real 32-container ring with netem,
+cold-path (`UPSTREAM_TTL=0`), measuring raw-DHT + e2e + **latency** (p50/p95/p99 of the e2e client
+replies) from each node's `queries.csv` and the client CSV. Its **f=0/f=10 points anchor this model**
+(measured 2026-10-19, 60 s @ 10 qps, run 1): **f=0 raw-DHT 72.9%** (≈ A6's ∞ anchor 76.3% once
+node-0 caching is accounted for), e2e 99.5%, **p50 468 / p95 928 / p99 1298 ms**; **f=10 raw-DHT
+71.5%**, e2e 100.0%, **p50 363 / p95 920 / p99 1048 ms** (added-p95 −8 ms). The raw-DHT and e2e
+figures match the in-process primary's censorship-denial result; the small raw-DHT drop f=0→f=10
+(72.9→71.5%) tracks the resolvable bound 1−f³. Latency is **e2e client-observed** (the node logs
+record hops/outcome, not per-hop time), so there is no separate raw-DHT latency column; p95 is flat
+(~920–928 ms) because the drop nodes black-hole fast and the honest-entry fallback carries the cost,
+not a slow timeout. The socket harness is slow (~4 min/bring-up) and intermittently stalls during
+warm-up — which is **why the in-process ring is the primary, robust deliverable**; this socket run is
+the realistic-network cross-check (f=0/f=10, the documented anchor).
 
 **Isolation (per the epic's cross-cutting rule).** Flipping `drop` *after* the ring converges, and
 reading over the converged replica set, cleanly separates **read-path censorship** (the vulnerability)

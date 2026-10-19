@@ -35,8 +35,11 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 RESULTS = REPO_ROOT / "results"
 B1_DIR = RESULTS / "b1"
-OUT_CSV = RESULTS / "B1_tampering.csv"
-OUT_FIG = RESULTS / "fig_B1_tampering.png"
+# NOTE (2026-10-19): the in-process ring (experiments/b1_inproc.py) is now the PRIMARY and owns
+# results/B1_tampering.csv + fig_B1_tampering.png. This Docker/netem aggregator writes the SEPARATE
+# cross-check file so a (slow, flaky) testbed run never clobbers the primary — mirrors B3's split.
+OUT_CSV = RESULTS / "B1_tampering_emulation.csv"
+OUT_FIG = RESULTS / "fig_B1_tampering_emulation.png"
 
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -180,7 +183,7 @@ def random_rows() -> list[dict]:
         n_mal = round(f_pct / 100 * B1_N)
         realized_f = n_mal / B1_N
         rows.append({
-            "block": "random", "f_pct": f_pct, "n_mal": n_mal,
+            "source": "emulation", "block": "random", "f_pct": f_pct, "n_mal": n_mal,
             "realized_f_pct": 100.0 * realized_f,
             "bound_majority_pct": 100.0 * analytic_bound(realized_f, B1_S),
             "bound_single_pct": 100.0 * effective_bound(realized_f, B1_S),
@@ -215,7 +218,7 @@ def targeted_rows() -> list[dict]:
     n_mal = round(statistics.fmean(n_mals)) if n_mals else 0
     realized_f = n_mal / B1_N
     return [{
-        "block": "targeted", "f_pct": round(100.0 * realized_f), "n_mal": n_mal,
+        "source": "emulation", "block": "targeted", "f_pct": round(100.0 * realized_f), "n_mal": n_mal,
         "realized_f_pct": 100.0 * realized_f,
         "bound_majority_pct": 100.0 * analytic_bound(realized_f, B1_S),
         "bound_single_pct": 100.0 * effective_bound(realized_f, B1_S),
@@ -229,7 +232,7 @@ def targeted_rows() -> list[dict]:
 # ---------------------------------------------------------------------------------------
 # CSV.
 # ---------------------------------------------------------------------------------------
-FIELDS = ["block", "f_pct", "n_mal", "realized_f_pct", "runs",
+FIELDS = ["source", "block", "f_pct", "n_mal", "realized_f_pct", "runs",
           "forged_accepted_pct", "forged_accepted_sd", "forged_distinct_pct",
           "bound_majority_pct", "bound_single_pct",
           "structural_majority_pct", "structural_single_pct",

@@ -53,9 +53,12 @@ a6/
 # design artifact (no measurement/RNG) regenerated deterministically; B0_threat_model.md is not
 # *.csv, so already tracked.
 !B0_threat_model.csv
-# Phase 7 B1 deliverable: tampering / cache-poisoning table (experiments/b1_tampering.py). The
-# figure (fig_B1_tampering.png) and B1_NOTES.md are not *.csv, so already tracked.
+# Phase 7 B1 deliverables: tampering / cache-poisoning tables. B1_tampering.csv = in-process primary
+# (experiments/b1_inproc.py, plotted by experiments/plot_b1.py); B1_tampering_emulation.csv =
+# Docker/netem cross-check (experiments/b1_tampering.py). The figures (fig_B1_tampering*.png) and
+# B1_NOTES.md are not *.csv, so already tracked.
 !B1_tampering.csv
+!B1_tampering_emulation.csv
 # Phase 7 B1 raw per-run snapshots (experiments/run_b1.sh: client.csv + placement.json + ring/)
 # — regenerable from the fixed seed (CLAUDE.md §2), so not committed; B1_tampering.csv is the
 # committed summary.

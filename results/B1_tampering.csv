@@ -1,6 +1,8 @@
-block,f_pct,n_mal,realized_f_pct,runs,forged_accepted_pct,forged_accepted_sd,forged_distinct_pct,bound_majority_pct,bound_single_pct,structural_majority_pct,structural_single_pct,success_rate_pct,success_sd,p50_ms,p95_ms,p99_ms,target,target_forged_pct,note
-random,0,0,0.0000,2,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,99.8333,0.0000,28.2520,945.9860,1221.5395,,,honest control
-random,20,6,18.7500,2,39.5320,13.9777,40.9091,9.2285,46.3623,9.2500,37.0000,99.6667,0.2357,3.0285,899.7502,1329.6226,,,
-random,40,13,40.6250,2,84.1509,4.2649,79.6296,36.1023,79.0680,41.2000,79.8000,99.9167,0.1179,3.1402,642.7545,960.0722,,,
-random,50,16,50.0000,2,90.2500,6.0104,87.4486,50.0000,87.5000,56.6000,87.4000,100.0000,0.0000,3.0600,600.1147,711.2807,,,
-targeted,6,2,6.2500,1,26.0434,0.0000,16.4609,1.1230,17.6025,7.9000,13.3000,99.8333,0.0000,3.1650,923.0084,1313.9551,google.com,100.0000,colluding: 2 nodes co-located on one chunk's replica set (crosses the bound)
+source,block,f_pct,n_mal,realized_f_pct,runs,forged_accepted_pct,forged_accepted_sd,forged_distinct_pct,bound_majority_pct,bound_single_pct,structural_majority_pct,structural_single_pct,success_rate_pct,success_sd,p50_ms,p95_ms,p99_ms,target,target_forged_pct,note
+inproc,random,0,0,0.0000,5,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,100.0000,0.0000,0.0009,0.1036,0.1308,,,honest control
+inproc,random,10,3,9.3750,5,24.0200,13.8502,22.7277,2.4719,25.5707,1.4400,22.3200,100.0000,0.0000,0.0009,0.0985,0.1316,,,
+inproc,random,20,6,18.7500,5,39.8000,12.8001,45.1703,9.2285,46.3623,4.4800,45.0800,100.0000,0.0000,0.0009,0.0883,0.1285,,,
+inproc,random,30,10,31.2500,5,65.6733,13.6769,68.8010,23.1934,67.5049,23.2600,69.9000,100.0000,0.0000,0.0009,0.0638,0.1163,,,
+inproc,random,40,13,40.6250,5,77.4867,12.1535,78.5103,36.1023,79.0680,36.5000,78.3800,100.0000,0.0000,0.0009,0.0601,0.1056,,,
+inproc,random,50,16,50.0000,5,86.7267,13.6671,86.9896,50.0000,87.5000,53.6800,87.0400,100.0000,0.0000,0.0009,0.0580,0.0899,,,
+inproc,targeted,6,2,6.2500,3,24.4444,0.4823,,1.1230,17.6025,7.9000,13.3000,,0.0000,,,,google.com,100.0000,colluding: 2 nodes co-located on one chunk's replica set (crosses the bound)

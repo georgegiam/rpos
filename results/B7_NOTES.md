@@ -45,9 +45,30 @@ weakness** — established from both directions:
 
 Either way the adversary buys ~nothing over honest load; the vulnerability is that the ring has **no
 RPC admission control or rate limiting** and a maintenance loop fragile under *any* sustained load.
-Caveat (flagged): the Light socket sweep's flooder achieved only ~57–96 RPC/s (rate-paced over
-netem), **below** the ring's ~100–250 qps saturation (A2), so the socket run stays on the robust
-side of the cliff; the in-process complement is what exercises the cliff itself.
+
+### Load-coverage caveat (what the socket sweep does and does not establish)
+
+The socket/Docker arm and the in-process arm cover **different load regimes**, and the distinction
+bounds what the socket "ring absorbs the flood" result can claim:
+
+- **The socket flooder never reached the system's saturation point.** Over the Light sweep it
+  achieved only **57.5 RPC/s** (at R=100 offered) and **95.6 RPC/s** (at R=400 offered) — these are
+  the measured `measured_rpc_per_s` values in `results/B7_dos.csv` (`source=socket`), held down by
+  netem rate-pacing. The resolver ring **saturates at ~100–250 qps** (A2: cold-path saturation at
+  250 qps, steady ≤200 qps). So the flooder's realized wire rate sat at or **below** the lower edge
+  of the saturation band and never pushed the ring past it.
+- **Therefore the socket-layer "ring absorbs the flood" finding (success ≥98.7 %, health ≥96.9 % at
+  R=400) is bounded by the offered/achieved load, not by the system's actual breaking point.** It
+  establishes that the ring is robust *up to the intensity we were able to deliver over netem* — it
+  does **not** establish robustness at or beyond saturation. A heavier socket sweep (larger
+  `B7_INTENSITY`, more flooder workers, or no netem pacing) would be required to locate the socket
+  cliff; that is left as documented future work, not claimed as a result.
+- **The in-process arm DID reach the fragility cliff and is the primary evidence for the headline.**
+  Driving the shared event loop to saturation pegs honest p95 at the 5 s timeout and sheds ~22 % of
+  the ring's correct successors (health 100 % → ~78 %) — and, crucially, a matched volume of
+  **honest** traffic does the same (attack − control delta only **+1.7 to +4.4 pp**). It is this
+  in-process complement, not the (sub-saturation) socket sweep, that demonstrates the DoS exposure is
+  `chord.py` load fragility rather than attack-specific amplification.
 
 ## Metric
 

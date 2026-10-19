@@ -34,8 +34,9 @@ caused by the adversary, not by cold-start or `chord.py` fragility. Two reinforc
 
 Net: the achieved bound is **`P(≥1 of s replicas malicious) = 1−(1−f)ˢ`**, not
 `P(≥⌈(s+1)/2⌉) = 3f²−2f³`. At s=3 that is 25.6 / 46.4 / 67.5 / 79.1 / 87.5% across the f grid versus
-the intended 2.5 / 9 / 23 / 36 / 50%. The measured curve sits on (slightly above, from read
-timeouts under load — see caveat 2) the `1−(1−f)³` line. **This is the examiner-facing result: the
+the intended 2.5 / 9 / 23 / 36 / 50%. The measured in-process curve sits **cleanly on** the
+`1−(1−f)³` line (no read-timeout inflation — in-process has no netem; the Docker cross-check sat
+slightly above it from load timeouts, caveat 2). **This is the examiner-facing result: the
 replicated DNS store's integrity defence is materially weaker than the thesis's majority-vote
 analysis claims.**
 
@@ -54,8 +55,10 @@ Two placement blocks:
   bound.
 
 ## Metric
-**Forged-acceptance (query-weighted)** = client replies with `answer_ip == 6.6.6.6` ÷ all
-**successful** replies (NOERROR + A record), from `query_gen.py --check-answers`. Also reported:
+**Forged-acceptance (query-weighted)** = replies whose resolved IP is the forged `6.6.6.6`
+(`node/malicious.py::FORGED_IP`) ÷ all **successful** replies. In the in-process primary this is read
+directly from `resolve_query`'s return value at node 0; in the Docker cross-check it is the
+`answer_ip == 6.6.6.6` fraction from `query_gen.py --check-answers`. Also reported:
 **forged-acceptance (distinct-chunk)** (fraction of distinct answered domains forged — cache lock-in
 makes a chunk consistently forged or not, so this ≈ the structural capture over queried chunks), and
 **DNS success rate** (should stay flat — see caveat 1).
@@ -70,37 +73,47 @@ Overlaid bounds (both drawn on the figure):
   `experiments/b1_placement.py::structural_capture_fraction` (the realized bounds this run matches;
   the analytic forms are their large-population limits).
 
-## Results (measured 2026-10-03, seed 20260919)
-Collected by `experiments/run_b1.sh` and analysed by `experiments/b1_tampering.py` →
-[`B1_tampering.csv`](B1_tampering.csv) + [`fig_B1_tampering.png`](fig_B1_tampering.png). Random sweep
-**f ∈ {0,20,40,50}% × 2 runs**, targeted **× 1 run**, **60 s** measured window @ 10 qps,
-`--ring-nodes 1` (honest node-0 entry). (A fuller grid f∈{0,10,20,30,40,50}%×3 at 120 s is a
-drop-in re-run — `bash experiments/run_b1.sh` with the defaults — but the trend below is already
-unambiguous; see "Workload".)
+## Results (measured 2026-10-19, seed 20260919)
+**Primary = the real in-process ring** (`experiments/b1_inproc.py` → [`B1_tampering.csv`](B1_tampering.csv),
+plotted by `experiments/plot_b1.py` → [`fig_B1_tampering.png`](fig_B1_tampering.png)). Full grid
+**f ∈ {0,10,20,30,40,50}% × 5 runs**, targeted **× 3 runs**, 1000-query warm-up + 3000-query measured
+Zipf pass per run, queries entering the honest node 0. The original Docker/netem run is retained as a
+cross-check in [`B1_tampering_emulation.csv`](B1_tampering_emulation.csv) (f ∈ {0,20,40,50}% × 2) — it
+**agrees on forged-acceptance** where the grids overlap, validating the transport swap (see below).
 
 | block | f % (realized) | n_mal | forged-accepted % (sd) | majority bound 3f²−2f³ | single bound 1−(1−f)³ | struct(≥1) | success % |
 |---|---|---|---|---|---|---|---|
-| random   | 0.0  | 0  | **0.00**        | 0.0  | 0.0  | 0.0  | 99.8 |
-| random   | 18.8 | 6  | **39.53** (13.98) | 9.2  | 46.4 | 37.0 | 99.7 |
-| random   | 40.6 | 13 | **84.15** (4.26)  | 36.1 | 79.1 | 79.8 | 99.9 |
-| random   | 50.0 | 16 | **90.25** (6.01)  | 50.0 | 87.5 | 87.4 | 100.0 |
-| targeted | 6.2  | 2  | **26.04** (target chunk **100.0**) | 1.1 | 17.6 | 13.3 | 99.8 |
+| random   | 0.0  | 0  | **0.00**         | 0.0  | 0.0  | 0.0  | 100.0 |
+| random   | 9.4  | 3  | **24.02** (13.85) | 2.5  | 25.6 | 22.3 | 100.0 |
+| random   | 18.8 | 6  | **39.80** (12.80) | 9.2  | 46.4 | 45.1 | 100.0 |
+| random   | 31.2 | 10 | **65.67** (13.68) | 23.2 | 67.5 | 69.9 | 100.0 |
+| random   | 40.6 | 13 | **77.49** (12.15) | 36.1 | 79.1 | 78.4 | 100.0 |
+| random   | 50.0 | 16 | **86.73** (13.67) | 50.0 | 87.5 | 87.0 | 100.0 |
+| targeted | 6.2  | 2  | **24.44** (target chunk **100.0**) | 1.1 | 17.6 | 13.3 | — |
 
 **Headline — the measured curve sits on the achieved ≥1-replica bound `1−(1−f)³`, NOT the intended
-majority bound `3f²−2f³`.** Forged-acceptance is ~4× the majority bound at every f (39.5% vs 9.2% at
-f≈19%; 90.3% vs 50% at f=50%) and matches the realized `struct(≥1)` fraction within run noise
-(39.5↔37.0, 84.2↔79.8, 90.3↔87.4). So an adversary needs only **one of a chunk's three replicas**,
-not two, to forge it — the mechanism in the headline-finding box (honest replicas abstain with `None`
-and are skipped by the vote; the fabricated reply blocks the honest write-back). The small excess
-over the realized ≥1 line at high f is read-timeout quorum collapse (caveat 2).
+majority bound `3f²−2f³`.** Forged-acceptance is ~3–4× the majority bound at every f (24.0% vs 2.5% at
+f≈9%; 65.7% vs 23.2% at f≈31%; 86.7% vs 50% at f=50%) and matches the realized `struct(≥1)` fraction
+within run noise (24.0↔22.3, 39.8↔45.1, 65.7↔69.9, 77.5↔78.4, 86.7↔87.0). So an adversary needs only
+**one of a chunk's three replicas**, not two, to forge it — the mechanism in the headline-finding box
+(honest replicas abstain with `None` and are skipped by the vote; the fabricated reply blocks the
+honest write-back).
 
-- **Honest control (f=0) = 0.00% forged**, votes almost all `3/3` — the effect is the adversary, not
-  `chord.py` fragility or cold-start.
+**Cross-method agreement (in-process primary ↔ Docker/netem cross-check):** at the overlapping points
+forged-acceptance matches within run variance — f≈19%: **39.8%** (inproc) vs **39.5%** (Docker);
+f≈41%: **77.5%** vs **84.2%**; f=50%: **86.7%** vs **90.3%**; targeted `google.com`: **100%** both,
+overall **24.4%** vs **26.0%**. The integrity result is **transport-independent** (the plurality vote
+in `node/storage.py::get_chunk` is byte-identical over either transport) — which is exactly why the
+fast, reproducible in-process ring is the faithful primary (the b4_inproc.py convention). The Docker
+run's slight excess over the ≥1 bound was read-timeout inflation (caveat 2), absent in-process.
+
+- **Honest control (f=0) = 0.00% forged**, votes resolve to the true value / fallback — the effect is
+  the adversary, not `chord.py` fragility or cold-start.
 - **Targeted/colluding:** just **2 nodes** (f≈6%) co-located on `google.com`'s replica set forge that
   chunk **100%** of the time; because `google.com` is the most popular Zipf domain it alone drives
-  **26%** of all answers forged — far above the 1.1% majority bound for that f. Collusion crosses the
+  **24%** of all answers forged — far above the 1.1% majority bound for that f. Collusion crosses the
   bound exactly as predicted.
-- **Success rate stays ~100% across f** (right panel) — a forged answer still resolves, so the harm is
+- **Success rate stays 100% across f** (right panel) — a forged answer still resolves, so the harm is
   **integrity, not availability**; the whole effect is the forged-acceptance delta over f=0.
 
 **Examiner-facing takeaway:** the replicated DNS store's integrity defence is **materially weaker than
@@ -110,7 +123,15 @@ counts only responders and a Byzantine replica can fabricate records it never st
 
 ## The new driver (no frozen edit — CLAUDE.md §2)
 B1 adds **only a driver**; the node-side attack machinery already existed and is byte-identical.
-Three additive pieces, all defaulting off so A1–A7 and `rpos/rpos.py` are unaffected:
+
+**Primary (in-process, like B3/B4/B6):** `experiments/b1_inproc.py` builds a real in-process ring of
+`MaliciousNode` (ids identical to the emulation — `node.tests.util.pk_for == b1_placement._pk_for`),
+flips f nodes to `lie`, and runs the **real** `node/query.py::resolve_query` path (real `get_chunk`
+plurality vote → real fallback). It imports/reads only; `node/*` and `rpos/rpos.py` are untouched.
+`experiments/plot_b1.py` draws the figure from the CSV (matplotlib + stdlib only, no node imports).
+
+The original Docker-testbed driver is retained for the cross-check and adds three additive pieces,
+all defaulting off so A1–A7 and `rpos/rpos.py` are unaffected:
 1. **`experiments/b1_placement.py`** — host-side, reproducible choice of *which* node indices are
    malicious. Node identities are the exact emulation ones (`node_id_from_pk(_pk_for(i))`); replica
    sets come from `sim/chord_sim.ChordRing` + `sim/query_sim._replica_set` (the same converged
@@ -134,26 +155,26 @@ Three additive pieces, all defaulting off so A1–A7 and `rpos/rpos.py` are unaf
 1000 Tranco domains, netem two-tier 5/50 ms, seed 20260919, δ=2.0 s, PLOT_N=1024, DRG in-degree 2.
 Placement resampled per run (seed = SEED+run), node 0 always honest.
 
-**As run (2026-10-03):** random sweep **f ∈ {0,20,40,50}%** × **2 runs**, targeted × **1 run**, **60 s**
-measured window — a deliberately trimmed matrix (9 bring-ups) because the ≥1-vs-≥2/3 finding is already
-unambiguous at these points. The script defaults to the fuller **f ∈ {0,10,20,30,40,50}% × 3 runs,
-120 s** (`bash experiments/run_b1.sh`), and the smoke additionally confirmed f=50 at `--ring-nodes 32`;
-all give the same headline. Env knobs (`B1_F`, `B1_RUNS`, `B1_DURATION`, `B1_TARGET_RUNS`) select the
-matrix.
+**As run (2026-10-19, in-process primary):** full grid **f ∈ {0,10,20,30,40,50}% × 5 runs**, targeted
+× **3 runs**, warm 1000 + measured 3000 Zipf queries per run — the whole sweep runs in **~3 s** (no
+container bring-up), which is why the in-process ring is the primary and the full grid is cheap.
+`--seeds`, `--queries`, `--warm`, `--f-levels`, `--target-runs` select the matrix. The Docker
+cross-check (`B1_tampering_emulation.csv`) was collected earlier at f ∈ {0,20,40,50}% × 2 runs, 60 s
+@ 10 qps.
 
-## Methodology — A4/A6's bring-up (warm @ 10 qps, snapshot ring logs WHILE UP)
-Per (block, point, run): compute the malicious index set host-side (`b1_placement.py`, written to
-`placement.json`); bring up N=32 with `--malicious-indices` + `--keep-up`; warm @ 10 qps to converge
-and populate the DHT (warm-up runs with the malicious nodes **already placed**, so the warm reads are
-themselves subject to forgery — consistent); truncate node logs to scope the window; drive the
-measured **10 qps** load (60 s as-run; 120 s default) with **`--ring-nodes 1`** (queries enter the **honest seed node 0**
-only — A6's isolation pattern, so any forgery comes purely from the DHT replica vote, not from
-entry-node behaviour; node 0 still queries all domains under Zipf, so it lands on captured chunks)
-and **`--check-answers`**; snapshot `client.csv` + each node's `queries.csv` while the containers
-still run; tear down. (The smoke used `--ring-nodes 32`; both give the same headline, node-0-only is
-the cleaner isolation and matches A6.) The nodes-mode **health gate** is relaxed to accept any valid
-A record (not the honest `answer_ip`) when `--malicious-indices` is set — otherwise the probe chunk's
-forged reply would hang the gate; default (no malicious) still requires the honest answer.
+## Methodology — in-process primary (cold DHT; flip `lie`; warm then measure)
+Per (block, point, run): reset every node's store to **empty** (cold) and clear caches, then flip the
+host-side malicious index set (`b1_placement.random_indices`/`targeted_indices`, same ids as the
+emulation) to `lie`; run a **warm pass** (1000 Zipf queries from node 0) so each touched domain's
+value is locked (forged or true); run a **measured pass** (3000 Zipf queries from node 0) reading
+`resolve_query`'s returned IP and counting forged-acceptance (`== 6.6.6.6`), distinct-chunk forgery,
+and success. **The cold start is essential and deliberate:** it is what lets a lone liar win the
+plurality vote (honest replicas abstain with `None`) and suppress the honest write-back — the exact
+≥1-of-s mechanism. (Pre-populating the replicas, as B4's routing run does, would hand the honest
+replicas the true value and measure the *wrong* majority bound.) Queries enter the **honest node 0**
+(A6's isolation pattern), so any forgery comes purely from the DHT replica vote. The Docker
+cross-check used the same logic over sockets with `--ring-nodes 1 --check-answers` and a health gate
+relaxed to accept any valid A record when `--malicious-indices` is set.
 
 ## Honest caveats (flag, don't hide — CLAUDE.md §2)
 1. **The attack harms integrity, not availability.** A forged answer still "succeeds" at the DNS
@@ -161,12 +182,13 @@ forged reply would hang the gate; default (no malicious) still requires the hone
    point). The attack's effect is entirely the **forged-acceptance delta** over the f=0 control, not
    degraded success. The honest control (f=0 → 0% forged, votes almost all `3/3`) is what separates a
    real vulnerability from `chord.py` fragility — and here it confirms the effect is real.
-2. **Read-timeout quorum collapse inflates the result above even the 1−(1−f)³ line.** Under netem +
-   load, honest replica reads (real lookups) sometimes miss the 2 s `get_chunk` timeout while a `lie`
-   node answers instantly (fabricated, no work), so the responder set shrinks further and the fast
-   liar wins more often. This is why the smoke's f=50 measured 96% vs the 91.4% realized ≥1 structural
-   bound. It compounds the abstention mechanism (headline finding) rather than causing it — f=0 shows
-   full `3/3` quorum under the same load.
+2. **Read-timeout quorum collapse (Docker cross-check only).** Under netem + load, honest replica
+   reads sometimes miss the 2 s `get_chunk` timeout while a `lie` node answers instantly, so the
+   responder set shrinks and the fast liar wins slightly more often — which is why the Docker run sat
+   a little *above* the ≥1 bound (f=50: 90.3% vs 87.5%). The **in-process primary has no such
+   timeouts**, so its curve sits cleanly on the ≥1 bound (f=50: 86.7% vs 87.5%). The inflation
+   compounds the abstention mechanism (headline finding) rather than causing it, and its absence
+   in-process confirms the ≥1-of-s result is the real, transport-independent signal.
 3. **Cache lock-in.** Once a chunk's first DHT read is decided, node 0 caches it for its TTL, so a
    chunk is consistently forged or honest thereafter; the distinct-chunk rate therefore ≈ the
    structural capture fraction, while the query-weighted rate is Zipf-weighted toward popular chunks.
@@ -181,25 +203,37 @@ forged reply would hang the gate; default (no malicious) still requires the hone
    replica sets under churn (where they can differ) are A6's domain.
 7. **Realized f ≠ nominal f.** round(f·32) makes the realized fraction step (e.g. 30% → 10/32 =
    31.25%); the integer n_mal is authoritative and the bound is evaluated at realized f.
+8. **In-process latency is the processing floor, not network latency.** `p50/p95/p99_ms` in
+   `B1_tampering.csv` are sub-millisecond — the in-process bus has no netem delay — so they are **not**
+   comparable to realistic DNS latency and are not a B1 metric (B1's headline is integrity, and
+   success stays 100%). Realistic netem latency for B1-style load is in `B1_tampering_emulation.csv`
+   (p50 ≈ 3 ms cache-dominated, p95 ≈ 0.6–0.9 s) and in the A-series. The forged-acceptance result is
+   transport-independent, which is the whole point of using the fast in-process ring.
 
 ## How to reproduce
 ```
 python3 experiments/b1_placement.py --self-test     # deterministic placement check (no Docker)
-bash experiments/run_b1.sh                           # collect: random sweep + targeted (Docker Desktop)
-python3 experiments/b1_tampering.py                  # analyse -> B1_tampering.csv + fig_B1_tampering.png
+# PRIMARY (in-process real ring; needs dnspython — run in the rpos-node image or a venv with it):
+docker run --rm -v "$PWD":/repo -w /repo rpos-node:latest \
+    python experiments/b1_inproc.py --seeds 5 --warm 1000 --queries 3000   # -> B1_tampering.csv
+python3 experiments/plot_b1.py                       # -> fig_B1_tampering.png (needs matplotlib)
+# CROSS-CHECK (Docker/netem testbed; slow, optional):
+bash experiments/run_b1.sh                           # collect over sockets (Docker Desktop)
+python3 experiments/b1_tampering.py                  # analyse the snapshots (writes B1_tampering.csv;
+                                                     # redirect/keep as B1_tampering_emulation.csv)
 ```
-Smoke subset: `B1_F="0 50" B1_RUNS=1 B1_DURATION=20 bash experiments/run_b1.sh`. Random sweep only:
-`B1_TARGETED=0 bash experiments/run_b1.sh`. Snapshots land under
-`results/b1/{random/f<f>/run<r>,targeted/run<r>}/{client.csv, placement.json, ring/}` (git-ignored,
-seed-regenerable); `B1_tampering.csv` is the committed summary.
+The in-process sweep runs in ~3 s and is seed-reproducible. Docker snapshots land under
+`results/b1/{random/f<f>/run<r>,targeted/run<r>}/` (git-ignored, seed-regenerable).
 
 ## Output schema — `B1_tampering.csv`
-One row per (block, f point):
-`block, f_pct, n_mal, realized_f_pct, runs, forged_accepted_pct, forged_accepted_sd,
+One row per (source, block, f point):
+`source, block, f_pct, n_mal, realized_f_pct, runs, forged_accepted_pct, forged_accepted_sd,
 forged_distinct_pct, bound_majority_pct, bound_single_pct, structural_majority_pct,
 structural_single_pct, success_rate_pct, success_sd, p50_ms, p95_ms, p99_ms, target,
-target_forged_pct, note`. `bound_majority_pct` = intended `3f²−2f³`; `bound_single_pct` = achieved
-`1−(1−f)³`; `structural_*` = realized fractions over the 1000 chunks for this run's placement (≥2 and
-≥1 malicious). Emulation metrics are the **mean across the 3 runs** (forged-acceptance over
-**successful** client rows); `*_sd` are the run-to-run standard deviations (the plot's error bars).
+target_forged_pct, note`. `source` = `inproc` (primary) or, in `B1_tampering_emulation.csv`,
+`emulation` (Docker/netem cross-check). `bound_majority_pct` = intended `3f²−2f³`; `bound_single_pct`
+= achieved `1−(1−f)³`; `structural_*` = realized fractions over the 1000 chunks for this run's
+placement (≥2 and ≥1 malicious). Metrics are the **mean across the runs** (forged-acceptance over
+**successful** replies); `*_sd` are the run-to-run standard deviations (the plot's error bars).
+`p50/p95/p99_ms` for `source=inproc` are the sub-ms processing floor (caveat 8), not network latency.
 `target`/`target_forged_pct` are populated for the targeted block.
