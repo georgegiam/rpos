@@ -123,3 +123,7 @@ b7/
 # The figure (fig_C4_proof_metrics.png) and C4_NOTES.md are not *.csv, so already tracked. C4 is a
 # microbenchmark (no Docker) and writes the summary directly — there is no per-run raw snapshot dir.
 !C4_proof_metrics.csv
+# Phase 8 C5 CAPSTONE deliverable: full Chia-vs-proposed comparison table (experiments/c5_comparison.py).
+# Pure synthesis of the committed C1–C4/B2/B5 CSVs (no RNG); the --self-test re-validates every cell.
+# C5_comparison_table.md (the table + "what is lost" discussion) is not *.csv, so already tracked.
+!C5_comparison_table.csv
