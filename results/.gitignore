@@ -115,3 +115,7 @@ b7/
 # (fig_C2_roc.png) and C2_NOTES.md are not *.csv, so already tracked. C2 is a microbenchmark (no
 # Docker) and writes the summary directly — there is no per-run raw snapshot dir.
 !C2_delta_jitter.csv
+# Phase 8 C3 deliverable: detection-vs-challenges table (experiments/c3_detection.py). The figure
+# (fig_C3_detection.png) and C3_NOTES.md are not *.csv, so already tracked. C3 is a microbenchmark (no
+# Docker) and writes the summary directly — there is no per-run raw snapshot dir.
+!C3_detection.csv
