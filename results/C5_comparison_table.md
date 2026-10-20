@@ -77,7 +77,7 @@ its source (compact tag; full URLs/paths in the "Sources" key).
 ### 9. δ (timeout) sensitivity
 | Chia | Proposed v3 | Gained | Lost |
 |---|---|---|---|
-| **N/A** — Chia has no response-timeout δ | false-reject ≈0 for all δ≥1 s (honest p99 cross-region **146.5 ms**); **false-accept = 0 for δ≤2 s**; δ=5 s marginal vs the 5.15 s parallel floor [C2] | **δ≤2 s cleanly separates** honest from cheater under realistic network jitter | Correctness hinges on a **tuned δ** + jitter assumptions; a loose δ (=10 s at δ_g=8 / keep-75%) **admits a cheater** [C2] |
+| **N/A** — Chia has no response-timeout δ | false-reject ≈0 for all δ≥1 s (honest p99 cross-region **146.5 ms**); **false-accept = 0 for δ≤2 s against a *storage-saving* cheater** (keeps ≤25% labels → recompute ≥13 s); a ≥50%-keeper passes (FA=1 even at δ=2 s) but then stores ≈75% of the tree — **not storage-saving**; δ=5 s marginal vs the 5.15 s parallel floor [C2] | **δ≤2 s cleanly separates** honest from any cheater that discards enough storage to matter (keeps ≤25% labels) | Correctness hinges on a **tuned δ** + jitter assumptions; the separation holds only against a storage-saving cheater (a ≥50%-keeper passes, harmlessly), and a loose δ (=10 s at δ_g=8 / keep-75%) **admits even a storage-saving cheater** [C2] |
 
 ### 10. Detection probability
 | Chia | Proposed v3 | Gained | Lost |
@@ -167,9 +167,13 @@ because it opens 1+δ DRG parents each with a Merkle path, and it grows *linearl
 plot, so there is no clock to tune and no liveness assumption. The proposed scheme is **interactive** — a
 peer challenges a peer and the prover must answer within δ — which imports two things Chia does not have:
 an interactive liveness assumption, and a wall-clock timeout whose *value matters*. C2 shows δ≤2 s cleanly
-separates honest from cheater under real jitter (honest cross-region p99 is only 146.5 ms, false-accept
-is 0), but it also shows the knife-edge: at a loose δ=10 s with a high in-degree and a 75%-keeper the
-cheater gets *in* (false-accept → 1). Correctness now depends on a parameter choice and a network model,
+separates honest from a **storage-saving** cheater under real jitter (honest cross-region p99 is only
+146.5 ms, and a cheater keeping ≤25% labels must recompute ≥13 s so its false-accept is 0). The precise
+claim matters: at the deployed δ_g=2 a cheater keeping **≥50% labels** passes trivially (false-accept = 1
+even at δ=2 s), because keeping half the labels empties the back-cone — but that "cheater" is storing
+≈75% of the tree and has saved almost nothing, so it is not the attack δ is meant to stop. C2 also shows
+the real knife-edge: at a loose δ=10 s with a high in-degree and a 75%-keeper even a genuine storage-saver
+gets *in* (false-accept → 1). Correctness therefore depends on a parameter choice and a network model,
 which Chia's design sidesteps entirely.
 
 **4 — No VDF / no consensus-grade composability (row 12).** Chia composes PoSpace with a VDF ("Proof of

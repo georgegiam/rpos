@@ -151,9 +151,9 @@ ROWS = [
     (
         "9. delta (timeout) sensitivity",
         "N/A -- Chia has no response-timeout delta",
-        "false-reject ~0 for all delta>=1 s (honest p99 cross-region 146.5 ms); false-accept = 0 for delta<=2 s; delta=5 s marginal vs the 5.15 s parallel floor (C2)",
-        "delta<=2 s cleanly separates honest from cheater under realistic network jitter",
-        "Correctness hinges on a tuned delta and jitter assumptions; a loose delta (delta=10 s at delta_g=8 / keep-75%) admits a cheater (C2)",
+        "false-reject ~0 for all delta>=1 s (honest p99 cross-region 146.5 ms); false-accept = 0 for delta<=2 s against a STORAGE-SAVING cheater (keeps <=25% labels -> recompute >=13 s); a cheater keeping >=50% labels passes (FA=1 even at delta=2 s) but then stores ~75% of the tree -- NOT storage-saving; delta=5 s marginal vs the 5.15 s parallel floor (C2)",
+        "delta<=2 s cleanly separates honest from any cheater that discards enough storage to matter (keeps <=25% labels)",
+        "Correctness hinges on a tuned delta and jitter assumptions; the separation holds only against a storage-saving cheater (a >=50%-keeper passes, harmlessly), and a loose delta (delta=10 s at delta_g=8 / keep-75%) admits even a storage-saving cheater (C2)",
         CHIA_CONSENSUS_PDF,
         "C2_delta_jitter.csv (honest false_reject / cheater false_accept)",
     ),
@@ -277,6 +277,18 @@ CHECKS = [
     ("C2 cheater delta_g=8 keep75 delta=10 -> FA=1 (the loosening exploit)", "C2",
      {"role": "cheater", "drg_indegree": "8", "storage_frac_pct": "75.000000", "resp_delta_s": "10.000000",
       "rtt_tier": "cross", "sigma_ms": "20.000000"}, "false_accept_rate", 1.0, "exact"),
+    # DEPLOYED config (delta_g=2, delta=2 s): pin BOTH sides of the row-9 claim so it can never drift --
+    # a storage-saving cheater (keeps <=25% labels) is rejected, a >=50%-keeper passes (but stores ~75% tree).
+    ("C2 DEPLOYED delta_g=2 keep25 delta=2 -> FA=0 (storage-saving cheater rejected)", "C2",
+     {"role": "cheater", "drg_indegree": "2", "storage_frac_pct": "25.000000", "resp_delta_s": "2.000000",
+      "rtt_tier": "cross", "sigma_ms": "20.000000"}, "false_accept_rate", 0.0, "exact"),
+    ("C2 DEPLOYED delta_g=2 keep50 delta=2 -> FA=1 (>=50%-keeper passes, not storage-saving)", "C2",
+     {"role": "cheater", "drg_indegree": "2", "storage_frac_pct": "50.000000", "resp_delta_s": "2.000000",
+      "rtt_tier": "cross", "sigma_ms": "20.000000"}, "false_accept_rate", 1.0, "exact"),
+
+    # --- C3: the ">=33% escapes the delta=2 s timeout" claim (row 10) ---
+    ("C3 keep 33% p_fail = 0 (escapes the timeout; but stored ~75% of the tree)", "C3",
+     {"source": "empirical_pooled", "drg_indegree": "2", "storage_frac_pct": "33.000000"}, "p_fail", 0.0, "exact"),
 
     # --- C3: detection probability (row 10) ---
     ("C3 keep 25% p_fail = 0.741 (knee)", "C3",
@@ -304,6 +316,11 @@ CHECKS = [
     ("B5 1 PiB forge control of 1e6 ring = 0.0308", "B5",
      {"metric": "pospace_vs_free", "scheme": "pospace_v3", "storage_budget_h": "1 PiB", "N_honest": "1000000"},
      "control_forge_1ofs", 0.0308, "rel1"),
+    # the ~3.25e9x per-identity-cost multiplier quoted in row 11: with admission one 100 GiB plot = 1 identity,
+    # without it the same 100 GiB budget mints 3,253,763,103 keypair identities -> the multiplier IS this count.
+    ("B5 no-admission 100 GiB/1e6 -> 3.25e9 identities (the x3.25e9 cost multiplier source)", "B5",
+     {"metric": "pospace_vs_free", "scheme": "none", "storage_budget_h": "100 GiB", "N_honest": "1000000"},
+     "identities", 3253763103, "exact"),
 ]
 
 # non-CSV "gate" checks: assert a committed qualitative result cell is present (not a number)
