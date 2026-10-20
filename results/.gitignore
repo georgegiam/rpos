@@ -119,3 +119,7 @@ b7/
 # (fig_C3_detection.png) and C3_NOTES.md are not *.csv, so already tracked. C3 is a microbenchmark (no
 # Docker) and writes the summary directly — there is no per-run raw snapshot dir.
 !C3_detection.csv
+# Phase 8 C4 deliverable: proof-size & prover/verifier-time-vs-Chia table (experiments/c4_proof_metrics.py).
+# The figure (fig_C4_proof_metrics.png) and C4_NOTES.md are not *.csv, so already tracked. C4 is a
+# microbenchmark (no Docker) and writes the summary directly — there is no per-run raw snapshot dir.
+!C4_proof_metrics.csv
