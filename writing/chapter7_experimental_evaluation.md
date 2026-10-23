@@ -1,8 +1,9 @@
 <!--
   Chapter 7 — Experimental Evaluation (Phase 9, W1: issue #56)
-  Scope of this file: §7.1–§7.5 (testbed, methodology, parameter justification, baseline)
-  and §7.6 (Part A — performance results A1–A7, drafted by W2 / issue #57).
-  §7.7–§7.8 (Parts B/C results) are reserved stubs, drafted by W3–W4.
+  Scope of this file: §7.1–§7.5 (testbed, methodology, parameter justification, baseline),
+  §7.6 (Part A — performance results A1–A7, drafted by W2 / issue #57), and §7.7 (Part B —
+  malicious scenarios B0–B7, drafted by W3 / issue #58).
+  §7.8 (Part C results) is a reserved stub, drafted by W4.
 
   House style for porting into the external LaTeX source:
     * numeric [n] citations; external works are marked [CITE: …] for key reconciliation
@@ -663,9 +664,426 @@ its out-of-core regime are characterised in Part C.
 
 ## 7.7 Part B — Malicious scenarios
 
-*Reserved for W3 (issue #58). Experimental threat model and the tampering, targeted-placement,
-censorship, routing/eclipse, Sybil, malicious-proposer, and denial-of-service attacks across the
-adversary-fraction grid. Sources: `results/B0_…`–`B7_…`.*
+Part B answers the malicious-scenario half of examiner point **(ii)**: it runs real adversaries
+against the implemented resolver rather than reasoning about them only through the closed-form
+expressions of Chapter 4. The threat model of Chapter 4 assumes a polynomially bounded adversary
+that controls a fraction `f` of the nodes, may collude, and can observe, inject, delay, and drop
+traffic, with `f < 1/3` where Byzantine agreement is required and a storage-bounded limit for
+Sybil resistance under Proof of Space (Section 4.1). We instantiate that model as an experimental
+threat model (B0) and seven attack experiments (B1–B7), one per subsection (§7.7.1–§7.7.8), each
+mapped to a row of the thesis's Tables 4.1 and 4.2.
+
+Unless an experiment states otherwise, every attack runs on the testbed of Section 7.2 at the
+`N = 32` emulation ceiling with the frozen parameter set of Table 7.1 — replication `s = 3`
+(majority bound ⌈(s+1)/2⌉ = 2 of 3), the two-tier 5 ms / 50 ms network, a Zipf `α = 1.0` workload
+over 1000 Tranco domains, and seed `20260919`. The adversary fraction is swept over
+`f ∈ {0, 10, 20, 30, 40, 50} %`; because at `N = 32` the count of malicious containers is
+`round(f · 32)`, the realised fractions are `0, 9.375, 18.75, 31.25, 40.625`, and `50 %` for
+`0, 3, 6, 10, 13`, and `16` malicious nodes, and every table reports the realised figure. The
+bootstrap seed (node 0) is never made malicious and is the honest query entry and ring anchor, so
+a measured failure reflects the unavailability or corruption of *data or routes* rather than a
+client simply addressing a dead node. Two attacks are reported on a different axis because forcing
+them onto the `f` grid would misrepresent the threat: B2 on a grinding-*cost* axis and B5 on a
+storage-*budget* axis. Each malicious behaviour is driven through the `MALICIOUS_MODE` hooks of
+`node/malicious.py`, inert by default (Section 7.2.1), so the frozen `rpos/rpos.py` and
+`node/chord.py` stay byte-identical; where an attack needed new measurement code it was added in a
+new `experiments/b*.py` file that imports the protocol rather than editing it.
+
+**Honest-control methodology.** Every attack is reported as a *delta against a matched honest
+control*, and this is the single most important methodological choice in Part B. The decentralised
+resolver's Chord maintenance loop is fragile under sustained load — as the `N = 64` diagnosis
+(Section 7.3.3) and the throughput study (Section 7.6.2) both showed — so raw degradation under
+attack conflates two different things: a genuine protocol weakness that an adversary *exploits*,
+and load fragility that *any* sufficiently heavy traffic would trigger. To separate them, each
+experiment also measures the system at `f = 0` (no adversary) or under a matched *volume* of purely
+legitimate traffic, and the protocol-attributable effect is the difference. An attack is only
+credited with a weakness to the extent it beats its honest control; where the control degrades just
+as much (B7), the finding is implementation fragility, not an attack. The matched control is what
+makes the Part B numbers defensible rather than alarmist.
+
+The seven experiments form two matched pairs and two cost-axis studies, a structure worth
+previewing because it is the chapter's clearest lesson about replication. On the *storage* path,
+integrity is weak but availability is strong: forging an answer needs only **one** of the `s`
+replicas (B1), whereas censoring one needs **all** `s` (B3). On the *routing* path the same
+asymmetry recurs (B4). Placement within the ring turns out to be cheap (B2) while identities are
+costly (B5), and the two compose. The ledger write path (B6) is the single weakest surface, and the
+denial-of-service exposure (B7) is dominated by implementation fragility rather than by the
+adversary. We take them in order.
+
+### 7.7.1 Experimental threat model (B0)
+
+Before running any adversary we fixed an experimental threat model, the design-only deliverable that
+frames every later run and ties each attack to the thesis's threat tables. It is generated
+deterministically by `experiments/b0_threat_model.py` (no Docker, no randomness, byte-identical on
+re-run) and recorded in `results/B0_threat_model.csv`, with the full forward-and-reverse mapping in
+`results/B0_threat_model.md`. The model fixes three adversary dimensions for each attack: the
+**fraction** `f` it is swept over; whether the adversaries are **colluding or independent** (collusion
+being the stronger model, the one that crosses the majority/quorum bounds); and whether placement is
+**random** — malicious identities falling where `node_id = H(pk)` lands them — or **targeted** at a
+chosen chunk (the feasibility of which is B2's subject). Table 7.6 lists the seven attacks against
+these dimensions and against the thesis rows they exercise.
+
+**Table 7.6 — Experimental threat model: the seven attacks against the Chapter 4 threat tables**
+(source: `results/B0_threat_model.csv`; full forward/reverse mapping in `results/B0_threat_model.md`).
+
+| ID | Attack | `f` axis | Collusion | Placement | Metric | Defence probed | Thesis row (Table 4.1 / 4.2) |
+|---|---|---|---|---|---|---|---|
+| B1 | Tampering / poisoning | 0–50 % | both | both | % forged answers accepted vs the vote bound | `s`-replica majority vote (`storage.py`) | 4.1 Integrity: cache poisoning; forged responses |
+| B2 | Targeted placement / ID grinding | cost | colluding | targeted | cost to own ⌈(s+1)/2⌉ replicas; ID-grindability | consistent-hash ID + PoSpace admission | 4.1 Availability: eclipse; Censorship: consensus manipulation |
+| B3 | Censorship | 0–50 % | both | both | blocked-domain success + latency | replication + fallback (`query.py`) | 4.1 Censorship: selective blocking; indirect/adaptive |
+| B4 | Routing / eclipse | 0–50 % | colluding | both | lookup success + extra hops | finger + successor-list redundancy (`chord.py`) | 4.1 Availability: eclipse; partitioning |
+| B5 | Sybil | budget | colluding | both | identities + chunk control per storage budget | PoSpace v3-DRG admission | 4.2 Sybil (also amortisation) |
+| B6 | Malicious proposer | 0–50 % | colluding | both | bad-update rejection + time to eviction | 2PC majority commit (`ledger.py`) + eviction | 4.1 Censorship: consensus manipulation + Integrity; 4.2 Rationality |
+| B7 | Denial of service | 0–50 % | both | both | honest-query success + latency (effect on others) | redundancy; no dedicated DoS defence | 4.1 Availability: DoS; partitioning |
+
+Read in reverse, the mapping also makes the coverage gaps explicit rather than silent. Of Table 4.1,
+the **Privacy** rows (metadata leakage, colluding-node linkability, traffic analysis) are outside the
+experimental attack scope of this resubmission; **Replay** is mitigated by construction — TTL refresh
+plus the hash-chained ledger — rather than measured; **High churn** is already answered by the churn
+experiment of Section 7.6.6 (A6) and is not re-run here; and **Partitioning** is exercised only
+partially, as a by-product of colluding misroute/drop in B4 and B7. Of Table 4.2, the **Amortisation**
+and **Rationality** rows belong to the Proof-of-Space risk check (Chapter 6) and to Part C, and are
+touched by B5's shared-storage analysis. These omissions are deliberate and flagged in
+`results/B0_threat_model.md`, in keeping with the "flag, don't hide" rule of the methodology.
+
+### 7.7.2 Tampering and cache poisoning (B1)
+
+B1 asks how often an adversary can get a *forged* DNS answer accepted, and measures it against the
+protection the design intends — the `s`-replica majority vote in `node/storage.py`. The primary run is
+a real in-process ring (`experiments/b1_inproc.py`) at `N = 32`, `s = 3`, over the full `f` grid with
+five runs per point (targeted placement with three), each run a 1000-query warm-up followed by a
+3000-query measured Zipf pass entering at honest node 0; a `lie` node fabricates the address `6.6.6.6`
+on every replica read. A Docker/netem run (`results/B1_tampering_emulation.csv`) cross-checks it.
+Table 7.7 reports the forged-acceptance rate against both the intended majority bound `3f²−2f³` and
+the weaker ≥1-of-`s` bound `1−(1−f)³`, and Figure 7.6 plots them.
+
+**Table 7.7 — Forged answers accepted versus the replica-vote bounds** (source:
+`results/B1_tampering.csv`, in-process primary; cross-check `results/B1_tampering_emulation.csv`;
+end-to-end success 100.0 % at every `f`).
+
+| Realised `f` (%) | `n_mal` | Forged accepted (%) ± sd | Majority bound `3f²−2f³` (%) | ≥1-of-`s` bound `1−(1−f)³` (%) |
+|---|---|---|---|---|
+| 0.000  | 0  | 0.00 ± 0.00   | 0.00  | 0.00  |
+| 9.375  | 3  | 24.02 ± 13.85 | 2.47  | 25.57 |
+| 18.750 | 6  | 39.80 ± 12.80 | 9.23  | 46.36 |
+| 31.250 | 10 | 65.67 ± 13.68 | 23.19 | 67.50 |
+| 40.625 | 13 | 77.49 ± 12.15 | 36.10 | 79.07 |
+| 50.000 | 16 | 86.73 ± 13.67 | 50.00 | 87.50 |
+
+**Figure 7.6 — Forged-acceptance rate versus adversary fraction, against the majority and
+≥1-of-`s` bounds** (`results/fig_B1_tampering.png`; source: `results/B1_tampering.csv`).
+
+The headline is that the replica vote delivers only **≥1-of-`s`** protection, not the intended
+majority: measured forged-acceptance tracks `1−(1−f)³` closely (24.02 % against a 25.57 % bound at
+`f ≈ 9 %`, 86.73 % against 87.50 % at `f = 50 %`) and sits roughly four times above the majority bound
+`3f²−2f³` it was supposed to obey (which predicts only 2.47 % and 50.00 % at those points). The
+mechanism is visible in `node/storage.py::get_chunk`: an honest replica that does not hold the chunk
+returns `None` and is *skipped* by the plurality tally, so a single liar facing two abstainers wins
+the vote 1-of-1; and because the fabricated reply counts as a DHT hit, it suppresses the honest
+iterative-resolution write-back, so any chunk whose replica set touches even one malicious node stays
+forgeable. Against the honest control at `f = 0` the forged rate is exactly 0.00 %, confirming the
+effect is adversary-caused. End-to-end success stays at 100.0 % across the whole grid, so the harm is
+to **integrity, not availability**. Collusion sharpens it dramatically: just two nodes co-located on
+`google.com`'s replica set forge that one record 100 % of the time, and because `google.com` is the
+most popular Zipf domain this single placement forges 24.44 % of *all* answers (against a 1.12 %
+majority bound). The Docker cross-check agrees transport-independently — 39.53 %, 84.15 %, and 90.25 %
+at `f ≈ 19 / 41 / 50 %`, and 26.04 % for the targeted case — its slight excess over the ≥1-of-`s` line
+being read-timeout quorum collapse under netem, which the in-process run does not incur. The
+appropriate fix, stated here but deliberately not implemented (the methodology measures the frozen
+system), is to require a quorum of ⌈(s+1)/2⌉ *agreeing* non-`None` replies and to fall back to
+iterative resolution with store-back when no quorum is met, which restores the `3f²−2f³` bound.
+
+### 7.7.3 Targeted placement and ID grinding (B2)
+
+B1's targeted result assumed the adversary could place identities on a chosen chunk's replica set; B2
+measures whether that placement is actually feasible under Proof-of-Space admission. It is a
+microbenchmark (`experiments/b2_grinding.py`, imports and reads only — Docker cannot measure "hashes
+to grind a `pk`"), using the measured SHA-256 rate of 20.36 MH/s. Table 7.8 reports both the cost of
+*grinding* an identity into a chosen inter-node gap and the resulting cost of *capturing* a chosen
+chunk, targeted versus random, across ring sizes.
+
+**Table 7.8 — Grinding cost and chunk-capture cost, targeted versus random** (source:
+`results/B2_targeted.csv`; `s = 3`; grind cost is expected hashes `≈ N`, measured in parentheses;
+native time at 20.36 MH/s).
+
+| `N` | Grind cost (hashes) | Grind time (native) | Targeted capture | Random capture @ 50 / 90 / 99 % |
+|---|---|---|---|---|
+| 32    | 32 (54 measured)        | 0.003 ms | 2 plots (1 under B1) | 16 / 26 / 30 |
+| 1 000 | 1 000 (904)             | 0.044 ms | 2 plots (1)          | 500 / 804 / 941 |
+| 10⁶   | 10⁶ (2.13 × 10⁶)        | 105 ms   | 2 plots (1)          | 5.0 × 10⁵ / 8.0 × 10⁵ / 9.4 × 10⁵ |
+| 10⁹   | 10⁹ (extrapolated)      | 49.1 s   | 2 plots (1)          | 5.0 × 10⁸ / 8.0 × 10⁸ / 9.4 × 10⁸ |
+
+**Figure 7.7 — ID-grinding cost and targeted-versus-random capture cost versus ring size**
+(`results/fig_B2_targeted.png`; source: `results/B2_targeted.csv`).
+
+The finding is that Proof of Space rate-limits the *number* of identities, not *where* they land.
+Because `node_id = SHA-256(pk) mod 2¹⁶⁰` is unsalted and the attacker chooses its own `pk`, landing an
+identity in one inter-node gap (width `≈ 2¹⁶⁰ / N`) costs only `≈ N` hashes in expectation — 54
+measured at `N = 32`, and about 49.1 s of native hashing even at a billion-node ring — a cost dwarfed
+by the single Proof-of-Space plot the winning `pk` must then carry (Section 7.6.7). The consequence is
+stark: targeted capture of *any* chosen chunk costs a constant **two** plotted identities (and only
+**one** under B1's ≥1-of-`s` weakness), independent of `N` and of the chunk's popularity, whereas
+capturing a chosen chunk by *random* placement needs `≈ O(N)` identities (16, 26, 30 at `N = 32` for
+50 / 90 / 99 % success, scaling to hundreds of millions at `N = 10⁹`). An in-process admission demo
+closes the loop end-to-end: a `pk` ground in eight hashes built a genuine v3 DRG plot, passed
+admission, became `google.com`'s primary, and served the forged answer. The honest control captures
+zero chunks, so this is a protocol/design property — the unsalted `id = H(pk)` over a sparse ring —
+not `chord.py` fragility. The fix, flagged not implemented, is to bind the identifier to a verifiable
+function of the *committed plot root* (or a VRF on `pk`), so that position cannot be ground
+independently of the plot and each attempted placement costs a fresh plot.
+
+### 7.7.4 Censorship (B3)
+
+B3 is the mirror image of B1: instead of forging an answer it tries to *deny* one, probing the
+replication-plus-fallback availability path of `node/query.py`. The primary run is an in-process
+storage-layer ring (`experiments/b3_inproc.py`) at `N = 32`, `s = 3`, three seeds and 2000 queries per
+point, with a `drop` node black-holing every read; a socket run on the real 32-container ring
+(`results/B3_censorship_socket.csv`) anchors the latency. Table 7.9 reports the raw-DHT lookup success
+(answered from the DHT itself) and the end-to-end success (after fallback) across the grid.
+
+**Table 7.9 — Censorship: raw-DHT and end-to-end success versus `f`** (source:
+`results/B3_censorship.csv`, in-process primary; socket latency cross-check
+`results/B3_censorship_socket.csv`).
+
+| Realised `f` (%) | `n_mal` | Raw-DHT success (%) ± sd | End-to-end success (%) | Censored bound `f³` (%) |
+|---|---|---|---|---|
+| 0.000  | 0  | 100.00 ± 0.00 | 100.00 | 0.00  |
+| 9.375  | 3  | 100.00 ± 0.00 | 100.00 | 0.08  |
+| 18.750 | 6  | 100.00 ± 0.00 | 100.00 | 0.66  |
+| 31.250 | 10 | 95.73 ± 7.35  | 100.00 | 3.05  |
+| 40.625 | 13 | 95.53 ± 7.52  | 100.00 | 6.70  |
+| 50.000 | 16 | 90.85 ± 7.71  | 100.00 | 12.50 |
+
+**Figure 7.8 — Censorship: raw-DHT and end-to-end lookup success versus adversary fraction**
+(`results/fig_B3_censorship.png`; source: `results/B3_censorship.csv`).
+
+Censorship is the **hardest** attack on this store, exactly because it is the dual of B1: denying a
+chunk's DHT path requires capturing its *entire* `s`-replica set, so the censored fraction tracks
+`f³` and even at `f = 50 %` only 12.50 % of chunks lose their DHT path — raw-DHT success stays at
+90.85 %. More importantly, end-to-end success never drops below 100.0 %: the honest entry node's
+iterative-resolution fallback re-fetches and re-stores whatever the DHT denies. The targeted case is
+the sharp demonstration — dropping all three replicas of `google.com` takes its raw-DHT success to
+0.0 % while it still resolves end-to-end at 100.0 % — and is the precise contrast to B1, where forging
+the same chunk needed only one of three replicas. Against the honest control (`f = 0` → 100 % / 100 %)
+the effect is adversary-caused. The residual cost is therefore latency, not denial: the socket
+cross-check shows the end-to-end tail essentially unchanged by light censorship (p95 of 927.8 ms at
+`f = 0` against 919.5 ms at `f = 10 %`), because drop nodes black-hole quickly and the fallback carries
+the cost. One consistency note: the socket cross-check reports a lower absolute raw-DHT level (72.86 %
+at `f = 0`) than the in-process 100 %, because the socket run is a cold-path measurement that counts
+the cache/DHT/fallback split of a real client, whereas the in-process primary isolates the storage
+read and vote; the two agree on the quantity of interest — the small `f = 0 → f = 10 %` drop
+(72.86 → 71.50 %) tracks `1 − f³` — and this is the documented storage-model-versus-cold-path
+distinction, not a contradiction.
+
+### 7.7.5 Routing and eclipse (B4)
+
+B4 moves the adversary from the storage layer to the routing layer: a `misroute` node claims to be the
+successor of every key and hands lookups back to itself, probing the finger-table and successor-list
+redundancy of `node/chord.py`. The primary run is again a real in-process ring
+(`experiments/b4_inproc.py`) at `N = 32`, `s = 3`, three seeds and 2000 queries per point — a
+methodological upgrade over B3, since a misroute reply returns quickly and lets the full
+`resolve_query` path run in-process without stalling. Table 7.10 separates the two distinct harms:
+how often routing is *poisoned* (a lookup sent to the wrong owner) from how often the DHT read is
+actually *denied*, alongside the end-to-end success and the extra hops paid.
+
+**Table 7.10 — Routing eclipse: routing poisoned, DHT denied, and end-to-end success versus `f`**
+(source: `results/B4_eclipse.csv`; extra hops relative to the `f = 0` baseline of 2.48 honest hops).
+
+| Realised `f` (%) | `n_mal` | Routing poisoned (%) | DHT denied, unweighted (%) | Raw-DHT success (%) ± sd | End-to-end (%) | Extra hops (Δ) |
+|---|---|---|---|---|---|---|
+| 0.000  | 0  | 0.00  | 0.00  | 100.00 ± 0.00 | 100.00 | —     |
+| 9.375  | 3  | 21.00 | 12.07 | 97.12 ± 3.81  | 100.00 | +2.02 |
+| 18.750 | 6  | 30.90 | 14.83 | 96.23 ± 3.80  | 100.00 | +1.69 |
+| 31.250 | 10 | 45.83 | 26.90 | 92.98 ± 6.24  | 100.00 | +1.66 |
+| 40.625 | 13 | 54.80 | 36.23 | 90.58 ± 6.19  | 100.00 | +1.56 |
+| 50.000 | 16 | 61.33 | 44.13 | 89.00 ± 5.03  | 100.00 | +1.78 |
+
+**Figure 7.9 — Routing poisoned versus DHT denied versus end-to-end success under misrouting**
+(`results/fig_B4_eclipse.png`; source: `results/B4_eclipse.csv`).
+
+Misrouting poisons *routing* heavily — up to 61.33 % of lookups are sent to the wrong owner at
+`f = 50 %`, and because malicious nodes gain centrality in finger tables the routing-eclipse rate sits
+*above* `f` at every point — yet it does only modest damage to the *DHT*. The reason is that the wrong
+primary's own successor list usually overlaps the true `s = 3` replica set, so the replicated read
+still finds the chunk: raw-DHT success stays at or above 89.00 % through `f = 50 %` (the Zipf-weighted
+denial rising only to 11.00 %, the unweighted per-chunk denial to 44.13 %), end-to-end success stays
+at 100.0 % via fallback, and the cost is roughly one-and-a-half to two extra hops. This is the routing
+analogue of B3's vote rescue — replication blunts random misrouting just as it blunts random dropping.
+The real threat is again targeted and cheap: a *single* misrouter placed on one on-path hop denies a
+victim node's entire 147-chunk range (raw-DHT 0.0 %, end-to-end 100.0 %), and likewise a chosen chunk
+such as `facebook.com` — the exact contrast to B3, where censoring one chunk needed all `s` replicas
+but eclipsing a whole node needs only one misrouter. The honest control (`f = 0`) shows 0 % eclipse,
+so the effect is adversary-caused. Three bounds are stated rather than hidden: eclipse is measured
+from the single honest origin node 0; misrouting applied *during* join or stabilisation (rather than
+after convergence) is a distinct attack we did not measure; and routing-eclipse and DHT-denial are
+reported separately precisely so that replication's rescue — the gap between the 61.33 % routing
+poisoned and the 11.00 % DHT denied — is visible.
+
+### 7.7.6 Sybil versus Proof-of-Space admission (B5)
+
+B5 measures the defence that motivates the whole scheme: how many identities, and how much chunk
+control, an adversary buys for a given storage budget under v3 DRG admission. It is a microbenchmark
+on the storage-budget axis (`experiments/b5_sybil.py`, imports and reads only), priced at the thesis
+plot of `REAL_PLOT_N = 3.355 × 10⁹` labels = 100 GiB per identity. Table 7.11 reports the identities
+minted per budget, the same budget's yield *without* admission (a 33-byte keypair per identity), and
+the resulting forge (≥1-of-`s`) control of a million-node ring.
+
+**Table 7.11 — Sybil yield and chunk control per storage budget** (source: `results/B5_sybil.csv`;
+`s = 3`; one identity = one plot = 100 GiB; forge control is the analytic ≥1-of-`s` bound against an
+`N = 10⁶` honest ring).
+
+| Storage budget | Identities (PoSpace) | Identities (free keypair) | Forge control of `N = 10⁶` ring |
+|---|---|---|---|
+| 100 GiB | 1         | 3.25 × 10⁹  | 0.0000 |
+| 1 TiB   | 10        | 3.33 × 10¹⁰ | 0.0000 |
+| 10 TiB  | 102       | 3.33 × 10¹¹ | 0.0001 |
+| 100 TiB | 1 024     | 3.33 × 10¹² | 0.0010 |
+| 1 PiB   | 10 485    | 3.41 × 10¹³ | 0.0308 |
+| 10 PiB  | 104 857   | 3.41 × 10¹⁴ | 0.2586 |
+| 100 PiB | 1 048 576 | 3.41 × 10¹⁵ | 0.8837 |
+
+**Figure 7.10 — Sybil identities and chunk control per storage budget, PoSpace versus free
+admission** (`results/fig_B5_sybil.png`; source: `results/B5_sybil.csv`).
+
+Because a plot cannot be amortised across identities, the number of identities is
+`⌊budget / 100 GiB⌋`, so even a petabyte of storage mints only 10 485 identities — enough for 3.08 %
+forge control of a million-node ring, with majority control of such a ring needing exabytes. Set
+against the no-admission world, where the same budget yields billions of 33-byte keypairs and total
+control, Proof of Space raises the per-identity cost by a factor of `(32 · N_plot) / 33 ≈ 3.25 × 10⁹`
+— the quantified value of admission, and the storage figures are δ-independent (the DRG in-degree
+changes only plot *time*, 165 / 247 / 411 s per 100 GiB for δ = 2 / 4 / 8, and proof size). A measured
+`N = 32` anchor, adding `m` real Sybils to the ring over 1000 served chunks, confirms the random-
+placement lower bound tracks `1−(1−f)^s` (forge control 0.170, 0.635, 0.729, 0.858 at `m = 1, 10, 16,
+31`), while the targeted anchor records the strong-adversary complement — two plots capture a chosen
+chunk at constant cost, via the grinding of B2.
+
+This cost floor, however, is **conditional**, and the in-process admission probe says exactly on what.
+It reports three gates: **no-amortisation PASS** (three distinct Sybils yield three distinct plot
+roots, so `k` identities genuinely need `k` plots); **pk↔id binding PASS** (a Sybil advertising another
+identity's commitment is *rejected* by `challenge_peer`, a real negative test, not the tautology
+`id = H(pk)`); and **minimum-plot-size FAIL** — an under-sized Sybil with a 1024-leaf plot is *admitted*
+into a 4096-leaf ring, because the frozen admission trusts the self-declared plot parameters `n` and
+`delta` with no minimum. The `⌊budget / 100 GiB⌋` floor therefore holds only if a minimum-plot-size
+check is enforced; the reference `node/pospace_admission.py` lacks one, so a Sybil currently pays for
+the *smallest accepted* plot rather than 100 GiB. The honest control (zero budget → zero capture)
+confirms the effect is adversary-caused, and the recommended fix — flagged, not implemented — is an
+`n ≥ MIN_PLOT_N` admission check with ring-agreed `n` and `delta`.
+
+### 7.7.7 Malicious ledger proposer (B6)
+
+B6 targets the *write* path — the Algorithm 3 ledger that commits record updates — and asks whether the
+two-phase-commit protocol in `node/ledger.py` rejects a bad proposal and evicts its proposer. No new
+malicious mode is needed, because a malicious proposer is defined only by the *value* it proposes and
+`propose_update` runs identical code for honest and malicious nodes. The primary run is a real
+in-process ring (`experiments/b6_proposer.py`) at `N = 32`, `s = 3`, with 40 distinct bad updates per
+`f` point and a separate eviction probe; a socket run cross-checks it on a live ring. Table 7.12
+reports the rejection rate across the grid.
+
+**Table 7.12 — Malicious proposer: bad-update rejection rate versus `f`** (source:
+`results/B6_proposer.csv`; 40 proposals per point; socket cross-check `results/B6_proposer_socket.csv`).
+
+| Realised `f` (%) | `n_mal` | Proposals | Committed | Rejection rate (%) | Ideal (validating) rejection (%) |
+|---|---|---|---|---|---|
+| 0.000  | 0  | 40 | 40 | 0.00 | 0.00 (honest control) |
+| 9.375  | 3  | 40 | 40 | 0.00 | 100.00 |
+| 18.750 | 6  | 40 | 40 | 0.00 | 100.00 |
+| 31.250 | 10 | 40 | 40 | 0.00 | 100.00 |
+| 40.625 | 13 | 40 | 40 | 0.00 | 100.00 |
+| 50.000 | 16 | 40 | 40 | 0.00 | 100.00 |
+
+**Figure 7.11 — Bad-update rejection rate and time-to-eviction for a malicious proposer**
+(`results/fig_B6_proposer.png`; source: `results/B6_proposer.csv`).
+
+The frozen ledger validates **nothing** about a proposal — not its content, not the proposer's
+identity, not its authorisation — so the bad-update rejection rate is **0 % at every `f`** (all 40
+forged updates commit at each point), and the poisoned entries still pass `verify_chain()`. This makes
+the write path *weaker* than B1's read path: where forging via B1 needs at least one malicious
+*replica*, B6 needs **zero** — one non-replica proposer commits arbitrary values to a majority of `s`
+*honest* replicas for any chosen chunk. The targeted case is correspondingly cheap: one proposer forges
+`google.com` 100 % of the time, corrupting 13.36 % of the Zipf answer stream at a cost of one. The
+rejection curve is deliberately flat in `f` — more malicious proposers scale coverage, not per-proposal
+success — which is the point, not a defect. Eviction is likewise absent: the malicious proposer, holding
+a valid plot, passes every Proof-of-Space challenge, and no code path links ledger misbehaviour to the
+`fail_counts`/`_evict` machinery, so its **time-to-eviction is infinite**. The positive control shows
+the machinery itself works — a node with a corrupted plot is evicted in exactly `MAX_FAILS = 3` rounds
+— it is simply not wired to ledger abuse. The honest control at `f = 0` accepts valid updates (0 %
+rejected = correct), so the zero delta between valid and forged acceptance is itself the finding: the
+protocol cannot tell a valid proposal from an invalid one. The socket cross-check confirms it over the
+wire — five valid and five forged updates both commit, each adding exactly `5 · s = 15` ledger entries
+ring-wide. The recommended fix, flagged not implemented, is replica-side proposal validation (authorise
+the proposer as the chunk's owner or replica, or require signed entries; validate the value; and for a
+TTL refresh re-resolve and compare upstream) wired into a consensus-eviction path for repeated bad
+proposals.
+
+### 7.7.8 Denial of service (B7)
+
+B7 measures the effect of a flood on *everyone else*, and is the experiment where the honest-control
+methodology matters most. There is no "flood" node mode — the five malicious modes are all reactive
+inbound overrides, whereas a flood originates traffic — so the attacker is modelled as a host-side
+flooder (`experiments/b7_flooder.py`, reusing the socket codec, no node edit). Two transports are run:
+an in-process complement (`experiments/b7_inproc.py`, three seeds) that drives the event loop to its
+saturation cliff, and the socket/Docker testbed (`experiments/run_b7.sh`) that measures the real wire;
+a blackhole block reuses the B3 `drop` plumbing across the `f` grid. Table 7.13 reports honest-client
+success and ring health under flood, attack against matched legitimate load.
+
+**Table 7.13 — Denial of service: honest-client impact, flood versus matched honest control** (source:
+`results/B7_dos.csv`; `protocol Δ` = control − attack success, in percentage points; in-process axis is
+flood concurrency, socket axis is offered RPC/s).
+
+| Transport | Intensity | Arm | Honest success (%) ± sd | p95 (ms) | Ring health (%) | Protocol Δ (pp) |
+|---|---|---|---|---|---|---|
+| in-process | 0   | attack  | 100.00 ± 0.00 | 26.7   | 100.00 | — |
+| in-process | 50  | attack  | 85.56 ± 6.94  | 5001.2 | 80.21  | +4.44 |
+| in-process | 50  | control | 90.00 ± 7.26  | 4699.8 | 79.17  | — |
+| in-process | 100 | attack  | 88.33 ± 1.67  | 5001.2 | 78.13  | +3.89 |
+| in-process | 200 | attack  | 92.22 ± 5.85  | 4674.7 | 79.17  | +1.67 |
+| in-process | 400 | attack  | 88.89 ± 4.81  | 5001.2 | 78.13  | +4.44 |
+| socket | 100 (57.5 achieved) | attack  | 99.67 | 920.5  | 100.00 | −2.17 |
+| socket | 100                 | control | 97.50 | 2422.7 | 100.00 | — |
+| socket | 400 (95.6 achieved) | attack  | 98.67 | 1019.1 | 96.88  | +0.17 |
+
+**Figure 7.12 — Denial of service: honest success and ring health under flood, attack versus control**
+(`results/fig_B7_dos.png`; source: `results/B7_dos.csv`).
+
+The DoS exposure is overwhelmingly `chord.py` load fragility, **not** an attack-specific weakness.
+In-process, the flood reaches the cliff — honest p95 pegs the 5 s timeout and the ring sheds about
+22 % of its correct successors (health falling from 100 % to roughly 78 %) — but a *matched volume of
+purely legitimate traffic does the same*, so the protocol-attributable delta is only +1.7 to +4.4
+percentage points. On the real socket transport the ring simply absorbs the flood up to the tested
+intensity (success at or above 98.67 % and health at or above 96.88 % even at 400 offered RPC/s), and
+the matched honest load is comparable or worse (the control's p95 of 2422.7 ms at 100 qps against the
+attack's 920.5 ms) — in other words, no amplification: the adversary buys essentially nothing over an
+honest client sending the same volume. The root cause is structural — the ring has no RPC admission or
+rate limiting, and the frozen `stabilize` drops its successor on any RPC exception, including a
+transient timeout — the same fragility diagnosed for `N = 64` (Section 7.3.3). The blackhole block
+mirrors B3: end-to-end success stays at or above 99.00 % through `f = 50 %` (fallback recovers) while
+raw-DHT falls only to about 68 %, so redundancy again defeats denial. One load-coverage caveat is
+flagged prominently: the socket flooder undershot saturation, achieving only 57.5 and 95.6 RPC/s (held
+down by netem pacing) against the resolver's roughly 100–250 qps saturation band (Section 7.6.2), so
+the socket "absorbs the flood" result is bounded by the delivered load rather than the true breaking
+point — the in-process arm, which does reach the cliff, is the primary evidence for the
+fragility-not-amplification conclusion.
+
+### 7.7.9 Summary of Part B
+
+Taken together the seven experiments give a consistent picture of where the implemented resolver is
+strong and where it is weak, and the recurring theme is that replication cuts both ways. On the storage
+path it makes integrity weak but availability strong: forging an answer needs just one of `s` replicas
+and tracks `1−(1−f)³` (B1), whereas censoring one needs all `s` and tracks `f³` (B3), and the routing
+layer shows the same asymmetry — random misrouting is blunted by the overlap of replica sets (B4). The
+cost of attacking the ring decomposes cleanly: placement within the ring is cheap, because the unsalted
+`id = H(pk)` can be ground in `≈ O(N)` hashes (B2), while identities are costly, because Proof of Space
+raises the per-identity price roughly `3.25 × 10⁹`-fold (B5) — though that floor is conditional on a
+minimum-plot-size check the reference code lacks. The two weakest surfaces are distinct from the
+replicated read path: the ledger write path validates nothing, so a single unauthorised proposer
+commits forgeries with a 0 % rejection rate and is never evicted (B6); and the denial-of-service
+exposure is dominated by `chord.py`'s lack of load headroom rather than by any amplification an
+adversary provides (B7). Every result is anchored by an honest control proving the effect is
+adversary-caused rather than reference fragility, and every weakness is paired with a concrete mitigation
+— an agreeing quorum with fallback (B1), identifier binding to the committed plot root (B2),
+minimum-plot-size enforcement (B5), and replica-side proposal validation with consensus eviction (B6) —
+stated for the revised design but, in keeping with the measure-the-frozen-system rule, not implemented
+in the code under test.
 
 ## 7.8 Part C — Proof of Space: proposed versus Chia
 
