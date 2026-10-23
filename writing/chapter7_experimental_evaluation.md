@@ -1,7 +1,8 @@
 <!--
   Chapter 7 — Experimental Evaluation (Phase 9, W1: issue #56)
-  Scope of this file: §7.1–§7.5 (testbed, methodology, parameter justification, baseline).
-  §7.6–§7.8 (Parts A/B/C results) are reserved stubs, drafted by W2–W4.
+  Scope of this file: §7.1–§7.5 (testbed, methodology, parameter justification, baseline)
+  and §7.6 (Part A — performance results A1–A7, drafted by W2 / issue #57).
+  §7.7–§7.8 (Parts B/C results) are reserved stubs, drafted by W3–W4.
 
   House style for porting into the external LaTeX source:
     * numeric [n] citations; external works are marked [CITE: …] for key reconciliation
@@ -391,9 +392,274 @@ results is preserved while the new evaluation is built around them.
 
 ## 7.6 Part A — Performance
 
-*Reserved for W2 (issue #57). Latency versus `N`, throughput and saturation, scalability and
-per-node load, replication cost, updates, churn, and admission — drawn against the Unbound
-reference band of Section 7.4. Sources: `results/A1_…`–`A7_…`.*
+Part A answers examiner point **(iii)**: the latency, throughput, and scalability of the *whole*
+resolver, measured rather than projected. Seven experiments (A1–A7) are reported. Each is run on
+the testbed of Section 7.2 at the `N = 32` emulation ceiling and, where scale demands it, carried
+into the thousand- to ten-thousand-node regime by the calibrated simulator of Section 7.3.3; each
+is read against the Unbound reference band of Section 7.4, and every quantitative claim names the
+`results/` CSV it is drawn from. Unless an experiment states otherwise, the frozen parameter set of
+Table 7.1 applies — replication factor `s = 3`, the two-tier 5 ms / 50 ms network, a Zipf `α = 1.0`
+workload over 1000 Tranco domains, and seed `20260919` — and every departure from it (the
+replication and plot-size sweeps, the throughput cache control, the churn schedule) is wired
+through environment variables and runtime overrides that leave the frozen `rpos/rpos.py` and
+`node/chord.py` byte-identical.
+
+### 7.6.1 Latency versus ring size (A1)
+
+We measured client-observed resolution latency at `N ∈ {4, 8, 16, 32}`, three runs per size (five
+at `N = 32`), at an unsaturated offered load of 10 queries per second. Each query is additionally
+classified by the outcome the serving node logged — a local **cache hit**, a **DHT hit** routed to
+and read from the responsible replicas, or an iterative **fallback** to the DNS hierarchy with
+store-back — by joining the client log to the per-node log within each (serving node, domain)
+bucket; the join matches 99.9–100 % of rows. Table 7.3 reports the percentile latencies per
+outcome and overall, and Figure 7.1 draws them against the flat Unbound band.
+
+**Table 7.3 — Resolution latency by ring size and outcome** (source: `results/A1_latency_vs_N.csv`;
+`rpos` success ≥ 99.2 % at every `N`, Unbound 100 %).
+
+| `N` | Outcome | Share (%) | p50 (ms) | p95 (ms) | p99 (ms) |
+|---|---|---|---|---|---|
+| 4  | all       | 100.0 | 4.8   | 650.4  | 726.6  |
+| 4  | cache hit | 50.9  | 3.2   | 4.1    | 5.0    |
+| 4  | DHT hit   | 18.9  | 319.5 | 351.8  | 411.7  |
+| 4  | fallback  | 30.1  | 496.5 | 686.5  | 850.1  |
+| 8  | all       | 100.0 | 270.6 | 887.9  | 1300.0 |
+| 8  | cache hit | 42.2  | 2.8   | 4.2    | 6.9    |
+| 8  | DHT hit   | 27.2  | 346.8 | 661.8  | 669.4  |
+| 8  | fallback  | 30.6  | 681.3 | 1171.2 | 1327.7 |
+| 16 | all       | 100.0 | 335.3 | 972.1  | 1295.7 |
+| 16 | cache hit | 32.9  | 2.4   | 4.4    | 6.7    |
+| 16 | DHT hit   | 36.6  | 354.7 | 736.5  | 768.4  |
+| 16 | fallback  | 30.4  | 723.2 | 1218.0 | 1495.7 |
+| 32 | all       | 100.0 | 510.6 | 1495.3 | 2737.4 |
+| 32 | cache hit | 24.9  | 1.3   | 4.2    | 5.2    |
+| 32 | DHT hit   | 44.4  | 485.4 | 1143.7 | 2207.8 |
+| 32 | fallback  | 30.4  | 1030.5| 1977.1 | 3308.1 |
+| —  | Unbound (band, all `N`) | — | 3.5 | 132.6 | 214.3 |
+
+**Figure 7.1 — Resolution latency versus ring size, split by outcome, against the Unbound band**
+(`results/fig_A1_latency_vs_N.png`; source: `results/A1_latency_vs_N.csv`).
+
+A cache hit is essentially a local operation — a median of 1.3 to 3.2 ms, flat in `N` and in fact
+below Unbound's own warm median of 3.5 ms — because it touches no ring traffic. A DHT hit or a
+fallback, by contrast, pays Chord routing and so grows with ring size: the DHT-hit median rises
+from 319.5 ms at `N = 4` to 485.4 ms at `N = 32`, and the fallback median from 496.5 ms to
+1030.5 ms, consistent with the `≈ ½·log₂N` hop growth of Chord [CITE: Stoica-Chord]. The crucial
+point is that the *overall* median is governed by the shifting mixture of outcomes, not by any one
+path slowing in isolation: as `N` grows the cache-hit share falls from 50.9 % to 24.9 % and the
+median migrates toward the DHT and fallback cost, lifting the overall p50 from 4.8 ms to 510.6 ms.
+The decentralised tail is three to eight times Unbound's — the expected price of iterative routing,
+majority-voted replica reads, and store-back over the emulated network — while the cache path
+remains competitive with a mature single resolver.
+
+One tail behaviour is reported rather than smoothed. At `N = 32` the 99th percentile is genuinely
+noisy: extending the experiment from three runs to five did not tighten it, because the slowest DHT
+and fallback queries sit right against the 5 s client timeout, so whether a handful of queries in a
+given run cross that ceiling swings the p99 by close to a second. The run-to-run standard deviation
+of the overall p99 is 43 % of its mean (a 2737.4 ms mean with a 1174.8 ms standard deviation; the
+DHT-hit and fallback series are 41 % and 43 %), against a 30 % noise threshold, and this caveat is
+carried in the `note` column of the N = 32 rows of the CSV. The p50 and p95 are stable and are the
+reliable headline; any claim that leans on the `N = 32` p99 must quote it with this spread.
+
+### 7.6.2 Throughput and saturation (A2)
+
+Measuring the resolver's throughput honestly required first removing a methodological confound. An
+earlier ascending load sweep on a single long-lived ring let the node caches accumulate across load
+points, so the measured p95 *fell* as the offered rate rose (from 1774 ms at 50 qps to 8.9 ms at
+100 qps) and the apparent saturation point drifted with however warm the cache happened to be: that
+sweep measured cache accumulation, not saturation, and its readings are superseded. The redo pins
+the cache state with a new `UPSTREAM_TTL` knob in `node/run_ring_node.py` (default 300 s, so A1 and
+A3–A7 are byte-identical and no frozen source is touched) and reports two clean curves at `N = 32`:
+a **COLD-PATH** curve (`UPSTREAM_TTL = 0`, so every lookup re-enters the DHT read path) and a
+**STEADY** curve (`UPSTREAM_TTL = 100000`, so every lookup is served from a warm cache). The
+node-side outcome mix confirms the pin exactly — 100 % DHT hits on the cold curve and 100 % cache
+hits on the steady curve, with a cache-share standard deviation of 0.0 pp at every level — and the
+achieved rate tracks the offered rate to within ±0.05 qps even at 300 qps, so a failure is genuine
+ring saturation and not a generator limit. Figure 7.2 shows both curves.
+
+**Figure 7.2 — Throughput: success rate and p95 latency versus offered load, cold DHT path versus
+warm cache** (`results/fig_A2_throughput.png`; source: `results/A2_throughput.csv`).
+
+The cold DHT path exercises the full read cost of the design — route, read three replicas, and vote
+— on every query, and it saturates (the first load point below 95 % success) at **250 queries per
+second**, its success declining monotonically from 99.9 % at 25 qps to 92.8 % at 300 qps while its
+p95 stays flat at roughly 650 ms. The warm cache path shows **no saturation through 200 qps**,
+holding 100 % success with a p95 of about 1 ms. The gap between the two curves is the quantified
+value of caching: the p95 differs by about 650-fold at matched mid-range load (653.4 ms against
+1.0 ms at 150 qps), and the raw DHT path saturates at roughly a quarter of the 200+ qps Unbound
+sustains over the same hierarchy (Section 7.4). Two bounds on the result are stated rather than
+hidden. Queries enter at a single node (node 0, as in the churn experiment) so that its cache is
+coherent and fully controllable; and an exploratory cold run with queries distributed across all 32
+entry points gave non-monotonic, unstable success (82 %, 96 %, 75 % at 25, 50, 75 qps) and was
+discarded, because sustained pure-DHT load from every node perturbs the frozen Chord maintenance
+loop into reconverging mid-measurement — the same `chord.py` fragility documented for `N = 64`
+(Section 7.3.3), not a queueing signal. The reported cold number is therefore a single-entry DHT
+saturation point, and the distributed path is more fragile still.
+
+### 7.6.3 Scalability and per-node load (A3)
+
+Scalability is the question of what happens to each node's work as the ring grows under a fixed
+external load. We held the offered load at 50 queries per second — below the saturation knee of
+Section 7.6.2 — and measured the emulation at `N ∈ {4, 8, 16, 32}` while the calibrated simulator
+carried the same experiment out to `N = 10 000`. Because the emulation has no wire-level message
+counter, per-node load is computed on both sides by the *same* model: the simulator's
+`ring_round_trips(outcome, hops)` accounting (a cache hit costs no ring messages, a DHT hit costs
+`route + 1 + s` round trips, a fallback twice that, with `s = 3` and a round trip counted as two
+messages) is applied identically to the measured emulation outcomes, so the two series are directly
+comparable. Figure 7.3 plots the result.
+
+**Figure 7.3 — Per-node message load and throughput versus ring size, emulation and simulation**
+(`results/fig_A3_scalability.png`; source: `results/A3_scalability.csv`).
+
+Per-node message load **falls monotonically as the ring grows**, which is the scalability property
+the design claims: a fixed query load is spread over more nodes while each query still touches only
+`O(log N)` of them. The decay is about 0.62× per doubling of `N` on both sides — from 75.4 to 48.4
+to 28.7 to 17.7 messages per node per second across `N = 4` to `32` in emulation, and from 43.0 to
+29.4 to 19.5 to 12.5 in the simulator — and the simulator continues the same slope out to just
+**0.12 messages per node per second at `N = 10 000`**, while throughput stays flat near the offered
+rate (emulation goodput 47.4 to 50.0 qps). The emulation points sit about 1.5 to 1.8 times above
+the simulator overlay at matching `N`: this is an absolute-level offset from cold-start cache
+warmth — the 30 s warm-up at 10 qps touches only about 300 of the 1000 Zipf domains, so the measured
+window still carries more first-time DHT and fallback lookups than the simulator's idealised steady
+state — and not a difference in slope. The scalability claim is the slope, on which the two agree.
+The model counts query-path RPCs only and excludes maintenance traffic, identically on both sides;
+and `N = 32`, the emulation ceiling, shows 94.8 % success at this heavier 50 qps load, consistent
+with the throughput result of Section 7.6.2.
+
+### 7.6.4 Cost of replication (A4)
+
+Replication is the mechanism behind both the integrity vote and the availability of the DHT, and
+A4 isolates its *cost* by sweeping the replication factor `s ∈ {3, 5, 7}` at `N = 32` and 10 qps
+with no induced failures. Table 7.4 reports the result; the raised factors are supplied through a
+runtime `SUCC_LIST_LEN` override that leaves `node/chord.py` byte-identical, and the `s = 3` row
+reproduces the `N = 32` operating point of A1 and A3.
+
+**Table 7.4 — Cost of replication at `N = 32`, 10 qps** (source: `results/A4_replication.csv`).
+
+| `s` | Source | Messages / query | p50 (ms) | p95 (ms) | Success (%) |
+|---|---|---|---|---|---|
+| 3 | emulation | 13.14 | 473.3 | 1421.5 | 99.8 |
+| 5 | emulation | 17.47 | 577.1 | 2370.6 | 97.1 |
+| 7 | emulation | 21.21 | 725.9 | 2753.4 | 90.1 |
+| 3 | simulation | 13.46 | 320.5 | 1300.0 | 100.0 |
+| 5 | simulation | 17.62 | 320.5 | 1300.0 | 100.0 |
+| 7 | simulation | 21.79 | 320.5 | 1300.0 | 100.0 |
+
+At steady state, with no replica actually failing, higher replication is **cost on every axis**. The
+message count per query rises roughly linearly in `s`, by about two messages per added replica — 13.14
+to 17.47 to 21.21 in emulation, matching the simulator's independent accounting (13.46 to 17.62 to
+21.79) to within about 3 % and so validating the shared message model. The emulation median latency
+rises from 473.3 ms to 725.9 ms because `node/storage.py` reads replicas **sequentially** over the
+emulated network, adding one round trip per replica; the simulator, which models the replica fan-out
+as parallel, stays flat at 320.5 ms, a deliberate and documented divergence that makes the emulation
+the headline for the latency trend and the simulator a message-model cross-check. Success *falls*
+from 99.8 % to 90.1 %, because with no failures the extra replicas add no availability while the
+lengthening sequential-read tail crosses the 5 s client timeout. This is the cost side only: higher
+`s` also multiplies storage by `s`, and its availability *benefit* appears only when replicas
+genuinely depart, which the churn experiment of Section 7.6.6 measures. (The simulator's uniform
+100 % success reflects its lack of a loss model, not a real result.)
+
+### 7.6.5 Cost of updates (A5)
+
+A record is updated through the Algorithm 3 ledger: a proposer locates the responsible node, runs a
+two-phase commit (pre-commit then commit) across the `s` replicas, and appends one hash-chained,
+tamper-evident entry per replica. A5 measured 50 real updates driven from node 0 at `N = 32`,
+`s = 3`, over three runs, counting messages on the wire and reading the ledger length across all 32
+nodes before and after. Table 7.5 reports it.
+
+**Table 7.5 — Cost of a ledger update at `N = 32`, `s = 3`, 50 updates** (source:
+`results/A5_updates.csv`).
+
+| Metric | Emulation (measured) | Simulation (model) |
+|---|---|---|
+| Updates committed | 50 / 50, every run | — |
+| Commit latency p50 / p95 / p99 (ms) | 583.0 / 834.4 / 866.6 | 438.5 / 646.5 / 826.5 |
+| Messages per update (round trips) | 22.08 (11.04) | 18.75 (9.38) |
+| Ledger entries appended | 150 (= 50 × `s`) | — |
+
+A coordinated, auditable update is sub-second at test scale: the emulation commits with a median of
+583.0 ms (standard deviation 3.2 ms over three runs), dominated by the two majority round trips to
+the replicas on top of the Chord lookup. The measured cost runs above the simulator's 438.5 ms model
+for two reasons the model makes explicit — `propose_update` issues its per-replica calls
+sequentially where the simulator models each phase as a parallel fan-out, and the emulation ring
+routes about half a hop above the theoretical optimum. The wire count of 22.08 messages per update
+(11.04 round trips) decomposes cleanly as one locate plus `2·s` replica round trips, and lands above
+the simulator's logical 18.75 because the extra locate round trips from the half-hop routing offset
+outweigh the self-directed calls the wire count elides. The ledger grew by exactly **150 entries =
+50 × `s`** on every run, verified ring-wide, which is the price of a verifiable audit log: one
+chained entry per replica per committed update. Because all 50 updates came from a single proposer to
+distinct domains there was no lock contention and no abort, so the abort path is exercised only by the
+unit tests and the simulator's self-test; and the update latency is the one path the simulator
+calibration (Section 7.3.3) does not fit, so the emulation figures are the measured headline and the
+simulator is an analytic lower bound. (The simulator's 44 847-entry growth reflects a two-hour
+horizon that folds in TTL-expiry refreshes, not the 50-update workload.)
+
+### 7.6.6 Resilience under churn (A6)
+
+Churn tests whether the resolver stays available as nodes join and leave. A host-side injector
+`docker kill`s and `docker start`s ring containers on a seeded alternating-renewal schedule, with a
+mean uptime swept over `{30, 60, 120, 300, ∞}` seconds and a mean 5 s downtime; the bootstrap seed
+(node 0) is never churned and all measured queries enter at node 0, so that a miss reflects the
+*unavailability of data or routes* rather than the client simply having addressed a dead node.
+Figure 7.4 reports lookup success against mean session length.
+
+**Figure 7.4 — Lookup success versus mean node session length** (`results/fig_A6_churn.png`; source:
+`results/A6_churn.csv`).
+
+Replication and the DNS-hierarchy fallback together keep the resolver available under churn. The
+raw-DHT success rate — the stricter headline, which counts only lookups answered from the DHT itself
+— degrades only gently as sessions shorten, from 76.30 % with no churn to 74.81, 72.89, 72.73, and
+70.73 % at 300, 120, 60, and 30 s mean sessions, a decline of about 5.6 pp (run-to-run standard
+deviation ≤ 1.1 pp) even at roughly one departure per second. End-to-end success, which the user
+actually observes, stays at or above 96 % throughout (99.97 % with no churn, 97.42 % at 30 s
+sessions), because the fallback re-fetches whatever churn evicts. The visible cost of heavy churn is
+therefore tail latency, not correctness: the median stays cache-flat at 1.6 to 2.9 ms while the p95
+nearly doubles under 30 s churn, from 938.5 ms to 1693.2 ms, as stale-routing retries accumulate.
+
+The 76.30 % no-churn anchor needs care, and A6 resolves it directly: it is **cold-start warming, not
+a routing or availability gap**. Splitting the no-churn miss per domain in time order attributes
+23.5 % to cold population (the first touch of an un-warmed Zipf-tail domain, where the DHT is
+genuinely empty and the query correctly falls back and stores the answer) and only **0.19 % to a
+populated-but-failed lookup** — and even that 0.19 % is an upper bound, since the few events are two
+client queries racing on the same two domains 108 ms and 485 ms apart, before the store-back lands,
+which is itself cold-start. The churn effect is thus the *decline below* the anchor, not its absolute
+level; the mean live population tracks the injector's model (27.8 rising to 32.0 nodes against a
+predicted ≈ 27.6 at 30 s), confirming the churn occurred at the intended rate. The simulator, which
+models data availability with active 1 s re-replication and no cold-start, is accordingly more
+optimistic (96.9 % at 30 s rising to 100 %) and serves as a directional cross-check rather than a
+fitted match: the emulation has no repair loop (a departed node's chunks are restored only when a
+later query re-fetches and stores them), so it is the pessimistic real-system view, and the
+cold-population split is exact only at the no-churn point.
+
+### 7.6.7 Cost of admission (A7)
+
+Admission is the Proof-of-Space gate every joining node must pass: build the v3 DRG plot, commit it
+with a Merkle tree, and answer a challenge. Because at these node counts a container run would bury
+the ~100 ms plot-size signal under seconds of startup and convergence noise, A7 is a microbenchmark —
+it times the node's *exact* admission functions over the eight real ring keys and cross-checks them
+against a real in-process eight-node ring performing genuine `create()`/`join()` — rather than a
+Docker experiment. Figure 7.5 plots join time against plot size on log-log axes.
+
+**Figure 7.5 — Admission (join) time versus plot size, with the Merkle-commit and challenge
+decomposition** (`results/fig_A7_admission.png`; source: `results/A7_admission.csv`).
+
+Admission cost is **plot-bound and linear in the plot size** (`O(N)` in the number of leaves). At
+the default DRG in-degree `δ = 2`, plotting dominates and scales as one SHA-256 per leaf — 1.59,
+6.54, 26.01, and 106.20 ms across plot sizes `2^10` to `2^16`, a clean factor of about 4 per
+four-fold size step (slope 1 on the log-log axes). The Merkle commitment is the second cost at about
+15 to 17 % of plotting (0.29 to 18.32 ms) and is independent of `δ`, while the challenge itself — proving
+and verifying — is negligible, a few tens of microseconds (prove ≈ 4 to 22 µs, verify ≈ 11 to 50 µs)
+because it opens only `1 + δ` Merkle paths regardless of plot size, leaving roughly five orders of
+magnitude of headroom under the 2 s admission timeout so that an honest joiner is never rejected on
+time. That the decomposition is faithful to the real path is confirmed by the in-process ring, whose
+end-to-end `join()` matches the summed component cost to within about 4 % (129.55 ms against
+124.54 ms at `2^16`); the small roughly-constant excess is the `find_successor` lookup, so the
+network part of admission is a modest additive constant and plotting is what grows. Raising `δ` buys
+depth-robustness at a cost on every axis — at `2^16` the plot grows to 106.20, 214.84, and 438.72 ms
+and the proof to 1632, 2720, and 4896 bytes for `δ = 2, 4, 8` — and a native implementation would cut
+the plot time by a further factor of 33 to 55 (a 3.22 ms floor at `δ = 2`, `2^16`). These are
+test-scale plots (`≤ 2^16` leaves); the thesis-scale plot of `N = 3.36 × 10^9` leaves (~200 GiB) and
+its out-of-core regime are characterised in Part C.
 
 ## 7.7 Part B — Malicious scenarios
 
